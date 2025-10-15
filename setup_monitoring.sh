@@ -57,8 +57,8 @@ EOF
 # Kopiere Grafana Dashboard
 cp lancache_grafana_dashboard.json monitoring/grafana/provisioning/dashboards/
 
-# Erstelle Web-Stats Seite mit CORS-Support
-cat > monitoring/web/index.html << 'EOF'
+# Erstelle korrigierte Web-Stats Seite
+cat > monitoring/web/index.html << 'HTML_END'
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -69,103 +69,147 @@ cat > monitoring/web/index.html << 'EOF'
     <script>
         async function refreshStats() {
             try {
-                // Verwende lokale Prometheus API
-                const response = await fetch('/api/prometheus', {
+                // Direkte Anfrage an den log-monitor Service (Port 9114)
+                const metricsUrl = window.location.protocol + '//' + window.location.hostname + ':9114/metrics';
+                
+                const response = await fetch(metricsUrl, {
                     method: 'GET',
+                    mode: 'cors',
                     headers: {
                         'Accept': 'text/plain'
                     }
                 });
                 
                 if (!response.ok) {
-                    throw new Error('Network response was not ok');
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
                 const text = await response.text();
+                console.log('Received metrics:', text.substring(0, 200) + '...');
                 
                 // Parse Prometheus metrics
-                const hitRate = text.match(/lancache_hit_rate ([0-9.]+)/);
-                const totalRequests = text.match(/lancache_requests_total ([0-9]+)/);
-                const totalBytes = text.match(/lancache_bytes_total ([0-9]+)/);
+                const hitRateMatch = text.match(/lancache_hit_rate ([0-9.]+)/);
+                const totalRequestsMatch = text.match(/lancache_requests_total ([0-9]+)/);
+                const totalBytesMatch = text.match(/lancache_bytes_total ([0-9]+)/);
                 
-                if (hitRate) {
-                    document.getElementById('hit-rate').textContent = 
-                        (parseFloat(hitRate[1]) * 100).toFixed(1) + '%';
+                // Update Hit Rate
+                if (hitRateMatch) {
+                    const hitRate = (parseFloat(hitRateMatch[1]) * 100).toFixed(1);
+                    document.getElementById('hit-rate').textContent = hitRate + '%';
+                    document.getElementById('hit-rate').className = 'stat-value';
                 } else {
-                    document.getElementById('hit-rate').textContent = '0.0%';
+                    document.getElementById('hit-rate').textContent = 'N/A';
+                    document.getElementById('hit-rate').className = 'stat-value error';
                 }
                 
-                if (totalRequests) {
-                    document.getElementById('total-requests').textContent = 
-                        parseInt(totalRequests[1]).toLocaleString();
+                // Update Total Requests
+                if (totalRequestsMatch) {
+                    const requests = parseInt(totalRequestsMatch[1]).toLocaleString();
+                    document.getElementById('total-requests').textContent = requests;
+                    document.getElementById('total-requests').className = 'stat-value';
                 } else {
-                    document.getElementById('total-requests').textContent = '0';
+                    document.getElementById('total-requests').textContent = 'N/A';
+                    document.getElementById('total-requests').className = 'stat-value error';
                 }
                 
-                if (totalBytes) {
-                    const gb = parseInt(totalBytes[1]) / (1024 * 1024 * 1024);
-                    document.getElementById('cache-size').textContent = 
-                        gb.toFixed(2) + ' GB';
+                // Update Cache Size
+                if (totalBytesMatch) {
+                    const bytes = parseInt(totalBytesMatch[1]);
+                    const gb = bytes / (1024 * 1024 * 1024);
+                    document.getElementById('cache-size').textContent = gb.toFixed(2) + ' GB';
+                    document.getElementById('cache-size').className = 'stat-value';
                 } else {
-                    document.getElementById('cache-size').textContent = '0.00 GB';
+                    document.getElementById('cache-size').textContent = 'N/A';
+                    document.getElementById('cache-size').className = 'stat-value error';
                 }
                 
-                document.getElementById('last-update').textContent = 
-                    new Date().toLocaleTimeString();
-                    
+                // Update timestamp
+                document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('connection-status').className = 'status connected';
+                
             } catch (error) {
                 console.error('Error fetching stats:', error);
-                document.getElementById('hit-rate').textContent = 'N/A';
-                document.getElementById('total-requests').textContent = 'N/A';
-                document.getElementById('cache-size').textContent = 'N/A';
-                document.getElementById('last-update').textContent = 'Error';
+                
+                // Show error state
+                document.getElementById('hit-rate').textContent = 'Error';
+                document.getElementById('hit-rate').className = 'stat-value error';
+                document.getElementById('total-requests').textContent = 'Error';
+                document.getElementById('total-requests').className = 'stat-value error';
+                document.getElementById('cache-size').textContent = 'Error';  
+                document.getElementById('cache-size').className = 'stat-value error';
+                document.getElementById('last-update').textContent = 'Connection failed';
+                document.getElementById('connection-status').textContent = 'Disconnected';
+                document.getElementById('connection-status').className = 'status disconnected';
             }
         }
         
-        // Initial load und dann alle 30 Sekunden
+        // Auto-refresh every 30 seconds
         window.onload = function() {
-            refreshStats();
+            refreshStats(); // Initial load
             setInterval(refreshStats, 30000);
         };
+        
+        // Manual refresh button
+        function manualRefresh() {
+            refreshStats();
+        }
     </script>
 </head>
 <body>
     <div class="container">
-        <h1>🎮 LanCache Quick Stats</h1>
+        <div class="header">
+            <h1>🎮 LanCache Quick Stats</h1>
+            <div class="status-bar">
+                <span class="status-label">Status: </span>
+                <span id="connection-status" class="status">Connecting...</span>
+                <button onclick="manualRefresh()" class="refresh-btn">🔄 Refresh</button>
+            </div>
+        </div>
         
         <div class="stats-grid">
             <div class="stat-card">
                 <h3>Cache Hit Rate</h3>
                 <div class="stat-value" id="hit-rate">Loading...</div>
+                <div class="stat-description">Percentage of requests served from cache</div>
             </div>
             
             <div class="stat-card">
                 <h3>Total Requests</h3>
                 <div class="stat-value" id="total-requests">Loading...</div>
+                <div class="stat-description">All requests processed by cache</div>
             </div>
             
             <div class="stat-card">
                 <h3>Cache Size</h3>
                 <div class="stat-value" id="cache-size">Loading...</div>
+                <div class="stat-description">Total data cached</div>
             </div>
         </div>
         
         <div class="links">
-            <a href="http://localhost:3000" target="_blank">📊 Grafana Dashboard</a>
-            <a href="http://localhost:9090" target="_blank">🔍 Prometheus</a>
-            <a href="http://localhost:9114/metrics" target="_blank">📈 Raw Metrics</a>
+            <a href="http://${window.location.hostname}:3000" target="_blank">📊 Grafana Dashboard</a>
+            <a href="http://${window.location.hostname}:9090" target="_blank">🔍 Prometheus</a>
+            <a href="http://${window.location.hostname}:9114/metrics" target="_blank">📈 Raw Metrics</a>
         </div>
         
         <div class="footer">
-            <p>LanCache Monitoring • Letzte Aktualisierung: <span id="last-update">-</span></p>
+            <p>LanCache Monitoring • Last Update: <span id="last-update">-</span></p>
+            <p class="debug-info">Metrics URL: <span id="metrics-url">-</span></p>
         </div>
     </div>
+    
+    <script>
+        // Show the metrics URL for debugging
+        document.getElementById('metrics-url').textContent = 
+            window.location.protocol + '//' + window.location.hostname + ':9114/metrics';
+    </script>
 </body>
 </html>
-EOF
+HTML_END
 
-# CSS Datei (unverändert aber sicherheitshalber)
-cat > monitoring/web/style.css << 'EOF'
+# Erstelle erweiterte CSS
+cat > monitoring/web/style.css << 'CSS_END'
 * {
     margin: 0;
     padding: 0;
@@ -188,11 +232,60 @@ body {
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
 }
 
-h1 {
+.header {
     text-align: center;
-    color: #333;
     margin-bottom: 40px;
+}
+
+h1 {
+    color: #333;
     font-size: 2.5rem;
+    margin-bottom: 20px;
+}
+
+.status-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.status-label {
+    font-weight: 600;
+    color: #666;
+}
+
+.status {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.status.connected {
+    background: #4CAF50;
+    color: white;
+}
+
+.status.disconnected {
+    background: #f44336;
+    color: white;
+}
+
+.refresh-btn {
+    background: #2196F3;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.3s ease;
+}
+
+.refresh-btn:hover {
+    background: #1976D2;
 }
 
 .stats-grid {
@@ -225,6 +318,18 @@ h1 {
 .stat-value {
     font-size: 2.5rem;
     font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.stat-value.error {
+    color: #ffcdd2;
+    font-size: 1.8rem;
+}
+
+.stat-description {
+    font-size: 0.9rem;
+    opacity: 0.8;
+    line-height: 1.4;
 }
 
 .links {
@@ -257,6 +362,13 @@ h1 {
     font-size: 0.9rem;
 }
 
+.debug-info {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: #999;
+    font-family: monospace;
+}
+
 @media (max-width: 768px) {
     .container {
         padding: 20px;
@@ -274,8 +386,13 @@ h1 {
         flex-direction: column;
         align-items: center;
     }
+    
+    .status-bar {
+        flex-direction: column;
+        gap: 10px;
+    }
 }
-EOF
+CSS_END
 
 # Setze korrekte Berechtigungen
 echo "🔐 Setze Berechtigungen..."
@@ -297,18 +414,18 @@ else
 fi
 
 echo ""
+echo "🔧 Web-Stats API-Problem behoben:"
+echo "• Direkter Aufruf von log-monitor:9114/metrics"
+echo "• Keine nginx API-Routen mehr nötig"
+echo "• Bessere Fehlerbehandlung und Status-Anzeige"
+echo ""
 echo "📋 Nächste Schritte:"
-echo "1. Überprüfen Sie die .env Datei:"
-echo "   nano .env"
+echo "1. Überprüfen Sie die .env Datei falls nötig"
+echo "2. Starten Sie das System: docker-compose up -d"
+echo "3. Warten Sie 1-2 Minuten bis alle Services bereit sind"
 echo ""
-echo "2. Starten Sie das System:"
-echo "   docker-compose up -d"
-echo ""
-echo "3. Überwachen Sie die Logs:"
-echo "   docker-compose logs -f"
-echo ""
-echo "🌐 Services werden verfügbar sein unter:"
+echo "🌐 Services werden verfügbar sein:"
 echo "• Grafana: http://localhost:3000 (admin/admin123)"
 echo "• Prometheus: http://localhost:9090"
-echo "• Quick Stats: http://localhost:8080"
+echo "• Web Stats: http://localhost:8080 (jetzt ohne API-Fehler!)"
 echo "• Metriken: http://localhost:9114/metrics"
