@@ -1,5 +1,7 @@
-x-restart-policy: &restart-policy "no"
+x-restart-policy: &restart-policy "unless-stopped"
+
 services:
+  # === ORIGINAL LANCACHE SERVICES ===
   dns:
     image: lancachenet/lancache-dns:latest
     env_file: .env
@@ -8,23 +10,97 @@ services:
       - ${DNS_BIND_IP}:53:53/udp
       - ${DNS_BIND_IP}:53:53/tcp
 
-## HTTPS requests are now handled in monolithic directly
-## you could choose to return to sniproxy if desired
-#
-#  sniproxy:
-#    image: lancachenet/sniproxy:latest
-#    env_file: .env
-#    restart: *restart-policy
-#    ports:
-#      - 443:443/tcp
-
   monolithic:
     image: lancachenet/monolithic:latest
     env_file: .env
     restart: *restart-policy
     ports:
-      - 80:80/tcp
-      - 443:443/tcp
+      - ${LANCACHE_IP}:80:80/tcp
+      - ${LANCACHE_IP}:443:443/tcp
     volumes:
       - ${CACHE_ROOT}/cache:/data/cache
       - ${CACHE_ROOT}/logs:/data/logs
+
+  # === MONITORING SERVICES ===
+  
+  # Log-Monitor für Echtzeit-Statistiken
+  log-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    env_file: .env
+    restart: *restart-policy
+    volumes:
+      - ${CACHE_ROOT}/logs:/data/logs:ro
+    ports:
+      - "9114:9114"
+    depends_on:
+      - monolithic
+    environment:
+      - LOG_PATH=/data/logs/access.log
+      - PROMETHEUS_PORT=9114
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9114/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus für Metriken-Sammlung
+  prometheus:
+    image: prom/prometheus:latest
+    restart: *restart-policy
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    depends_on:
+      - log-monitor
+
+  # Grafana für Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    restart: *restart-policy
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    user: "472"
+
+  # Einfacher Web-Server für Quick Stats
+  web-stats:
+    image: nginx:alpine
+    restart: *restart-policy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./monitoring/web:/usr/share/nginx/html:ro
+      - ${CACHE_ROOT}/logs:/var/log/lancache:ro
+    depends_on:
+      - log-monitor
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  default:
+    name: lancache-network
