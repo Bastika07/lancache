@@ -1,42 +1,29 @@
 groups:
-  - name: lancache.rules
+  - name: lancache_alerts
     rules:
-      # Cache Hit Rate zu niedrig
-      - alert: LowCacheHitRate
-        expr: lancache_hit_rate < 0.5
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "LanCache Hit Rate ist niedrig"
-          description: "Cache Hit Rate ist {{ $value | humanizePercentage }} für mehr als 10 Minuten"
-
-      # Hohe Response Time
-      - alert: HighResponseTime
-        expr: lancache_response_time_avg > 2
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "LanCache Response Time ist hoch"
-          description: "Durchschnittliche Response Time ist {{ $value }}s"
-
-      # Monitoring Service ist down
-      - alert: MonitoringDown
+      - alert: LanCacheDown
         expr: up{job="lancache-monitor"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "LanCache Monitoring ist offline"
-          description: "Der Log-Monitor Service ist nicht erreichbar"
-
-      # Wenige Requests (möglicherweise Problem)
-      - alert: LowRequestRate
-        expr: rate(lancache_requests_total[5m]) < 0.1
-        for: 15m
+          summary: "LanCache Monitor is down"
+          description: "LanCache monitoring service has been down for more than 2 minutes."
+          
+      - alert: LowHitRate
+        expr: lancache_hit_rate < 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LanCache hit rate is low"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} which is below 50%."
+          
+      - alert: HighRequestVolume
+        expr: rate(lancache_requests_total[5m]) > 100
+        for: 2m
         labels:
           severity: info
         annotations:
-          summary: "Niedrige Request Rate"
-          description: "Nur {{ $value }} Requests/Sekunde in den letzten 5 Minuten"
+          summary: "High request volume detected"
+          description: "Request rate is {{ $value }} requests/second."
