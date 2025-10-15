@@ -24,33 +24,28 @@ class LanCacheMonitor:
         self.requests_total = Counter(
             'lancache_requests_total', 
             'Total number of requests processed by LanCache',
-            ['status', 'method'],
-            registry=self.registry
-        )
-        
-        self.requests_by_cdn = Counter(
-            'lancache_requests_by_cdn_total',
-            'Total requests by CDN provider', 
-            ['cdn'],
+            ['status', 'method', 'cdn'],
             registry=self.registry
         )
         
         self.bytes_total = Counter(
             'lancache_bytes_total',
             'Total bytes served by LanCache',
-            ['cdn'],
+            ['cdn', 'hit_status'],
             registry=self.registry
         )
         
         self.cache_hits = Counter(
             'lancache_cache_hits_total',
             'Total cache hits',
+            ['cdn'],
             registry=self.registry
         )
         
         self.cache_misses = Counter(
             'lancache_cache_misses_total', 
             'Total cache misses',
+            ['cdn'],
             registry=self.registry
         )
         
@@ -60,9 +55,10 @@ class LanCacheMonitor:
             registry=self.registry
         )
         
-        self.response_time = Histogram(
-            'lancache_response_time_seconds',
-            'Response time distribution',
+        self.hit_rate_by_cdn = Gauge(
+            'lancache_hit_rate_by_cdn',
+            'Cache hit rate by CDN (0-1)',
+            ['cdn'],
             registry=self.registry
         )
         
@@ -84,27 +80,15 @@ class LanCacheMonitor:
             registry=self.registry
         )
         
-        # CDN-Detection
-        self.known_cdns = {
-            'steam': ['steampowered.com', 'steamcontent.com', 'steamusercontent.com'],
-            'epic': ['epicgames.com', 'unrealengine.com'],
-            'blizzard': ['blizzard.com', 'battle.net'],
-            'riot': ['riotgames.com'],
-            'origin': ['origin.com', 'ea.com'],
-            'uplay': ['ubisoft.com'],
-            'gog': ['gog.com'],
-            'microsoft': ['xbox.com', 'microsoft.com'],
-            'sony': ['playstation.com'],
-            'nintendo': ['nintendo.com'],
-            'generic': []
-        }
-        
-        # Manuelle Statistiken (da wir nicht auf _value zugreifen können)
+        # Statistiken-Tracking
         self.start_time = time.time()
         self.total_requests = 0
         self.total_hits = 0
         self.total_bytes_served = 0
         self.recent_requests = deque(maxlen=1000)
+        
+        # CDN-spezifische Statistiken
+        self.cdn_stats = {}
         
         # Setze initiale Werte
         self.hit_rate.set(0.0)
@@ -114,54 +98,64 @@ class LanCacheMonitor:
         logger.info(f"LanCache Monitor gestartet auf Port {self.port}")
         logger.info(f"Überwache Log: {self.log_path}")
 
-    def identify_cdn(self, url: str) -> str:
-        """Identifiziert CDN basierend auf URL"""
-        url_lower = url.lower()
+    def parse_lancache_log_line(self, line: str):
+        """Parst LanCache-spezifisches Log-Format"""
+        # LanCache Format: [cdn] ip / - - - [timestamp] "method url protocol" status bytes "referrer" "user_agent" "hit_status" "upstream" "-"
+        pattern = r'\[([^\]]+)\] (\S+) / - - - \[([^\]]+)\] "([^"]+)" (\d+) (\d+) "([^"]*)" "([^"]*)" "([^"]*)" "([^"]*)" "-"'
         
-        for cdn, patterns in self.known_cdns.items():
-            for pattern in patterns:
-                if pattern in url_lower:
-                    return cdn
-        
-        return 'generic'
-
-    def parse_log_line(self, line: str):
-        """Parst nginx Access-Log Zeile"""
-        # Nginx Combined Log Format
-        pattern = r'^(S+) - - [(.*?)] "(S+) (.*?) (S+)" (d+) (d+) "(.*?)" "(.*?)"'
         match = re.match(pattern, line.strip())
         
         if not match:
+            # Fallback für andere Formate
+            logger.debug(f"Konnte Log-Zeile nicht parsen: {line[:100]}...")
             return None
             
         try:
+            # Parse HTTP Request
+            request_parts = match.group(4).split(' ')
+            if len(request_parts) >= 3:
+                method = request_parts[0]
+                url = request_parts[1]
+                protocol = request_parts[2]
+            else:
+                method = request_parts[0] if request_parts else 'GET'
+                url = request_parts[1] if len(request_parts) > 1 else '/'
+                protocol = 'HTTP/1.1'
+            
             return {
-                'ip': match.group(1),
-                'timestamp': match.group(2),
-                'method': match.group(3),
-                'url': match.group(4),
-                'protocol': match.group(5),
-                'status': int(match.group(6)),
-                'bytes': int(match.group(7)) if match.group(7).isdigit() else 0,
-                'referrer': match.group(8),
-                'user_agent': match.group(9)
+                'cdn': match.group(1).lower(),  # [steam], [epic], etc.
+                'ip': match.group(2),
+                'timestamp': match.group(3),
+                'method': method,
+                'url': url,
+                'protocol': protocol,
+                'status': int(match.group(5)),
+                'bytes': int(match.group(6)) if match.group(6).isdigit() else 0,
+                'referrer': match.group(7),
+                'user_agent': match.group(8),
+                'hit_status': match.group(9),  # HIT, MISS, etc.
+                'upstream': match.group(10)
             }
-        except (ValueError, IndexError):
+        except (ValueError, IndexError) as e:
+            logger.debug(f"Fehler beim Parsen: {e}")
             return None
 
     def is_cache_hit(self, request) -> bool:
-        """Bestimmt ob Request ein Cache-Hit war"""
+        """Bestimmt ob Request ein Cache-Hit war basierend auf hit_status"""
         if not request:
             return False
             
-        status = request['status']
+        hit_status = request.get('hit_status', '').upper()
         
-        # HTTP 200 und 206 sind meist Cache-Hits
-        if status in [200, 206]:
+        # Direkte Auswertung des hit_status Feldes
+        if hit_status in ['HIT', 'STALE']:
             return True
+        elif hit_status in ['MISS', 'BYPASS', 'EXPIRED']:
+            return False
         
-        # 304 Not Modified ist auch ein Hit
-        if status == 304:
+        # Fallback auf HTTP Status
+        status = request.get('status', 0)
+        if status in [200, 206, 304]:
             return True
             
         return False
@@ -174,39 +168,51 @@ class LanCacheMonitor:
         self.total_requests += 1
         
         # Extrahiere Daten
+        cdn = request.get('cdn', 'unknown')
         method = request.get('method', 'GET')
         status = str(request.get('status', 0))
-        url = request.get('url', '')
         bytes_served = request.get('bytes', 0)
+        hit_status = request.get('hit_status', 'UNKNOWN')
         
-        # CDN identifizieren
-        cdn = self.identify_cdn(url)
+        # CDN-Statistiken initialisieren falls nötig
+        if cdn not in self.cdn_stats:
+            self.cdn_stats[cdn] = {'requests': 0, 'hits': 0, 'bytes': 0}
         
         # Metriken aktualisieren
-        self.requests_total.labels(status=status, method=method).inc()
-        self.requests_by_cdn.labels(cdn=cdn).inc()
+        self.requests_total.labels(status=status, method=method, cdn=cdn).inc()
         
         if bytes_served > 0:
-            self.bytes_total.labels(cdn=cdn).inc(bytes_served)
+            self.bytes_total.labels(cdn=cdn, hit_status=hit_status).inc(bytes_served)
             self.total_bytes_served += bytes_served
+            self.cdn_stats[cdn]['bytes'] += bytes_served
         
         # Cache Hit/Miss Tracking
+        self.cdn_stats[cdn]['requests'] += 1
+        
         if self.is_cache_hit(request):
             self.total_hits += 1
-            self.cache_hits.inc()
+            self.cdn_stats[cdn]['hits'] += 1
+            self.cache_hits.labels(cdn=cdn).inc()
         else:
-            self.cache_misses.inc()
+            self.cache_misses.labels(cdn=cdn).inc()
         
-        # Hit Rate berechnen
+        # Hit Rate berechnen (global)
         if self.total_requests > 0:
             hit_rate = self.total_hits / self.total_requests
             self.hit_rate.set(hit_rate)
+        
+        # Hit Rate per CDN berechnen
+        cdn_requests = self.cdn_stats[cdn]['requests']
+        if cdn_requests > 0:
+            cdn_hit_rate = self.cdn_stats[cdn]['hits'] / cdn_requests
+            self.hit_rate_by_cdn.labels(cdn=cdn).set(cdn_hit_rate)
         
         # Recent Requests für Aktivitäts-Tracking
         self.recent_requests.append({
             'timestamp': datetime.now(),
             'cdn': cdn,
-            'bytes': bytes_served
+            'bytes': bytes_served,
+            'hit_status': hit_status
         })
 
     def monitor_logs(self):
@@ -221,7 +227,7 @@ class LanCacheMonitor:
                         
                         for line in f:
                             if line.strip():
-                                request = self.parse_log_line(line)
+                                request = self.parse_lancache_log_line(line)
                                 if request:
                                     self.process_request(request)
                         
@@ -250,13 +256,21 @@ class LanCacheMonitor:
                                  if (cutoff - r['timestamp']).seconds < 60)
                 self.active_connections.set(recent_count)
                 
-                # Cache-Größe aus manueller Tracking (da wir nicht auf Counter._value zugreifen können)
+                # Cache-Größe setzen
                 self.cache_size_bytes.set(self.total_bytes_served)
                 
                 logger.info(f"Stats - Requests: {self.total_requests}, "
                           f"Hits: {self.total_hits}, "
                           f"Hit Rate: {(self.total_hits/max(self.total_requests,1))*100:.1f}%, "
                           f"Recent: {recent_count}")
+                
+                # CDN-Statistiken loggen
+                for cdn, stats in self.cdn_stats.items():
+                    if stats['requests'] > 0:
+                        cdn_hit_rate = (stats['hits'] / stats['requests']) * 100
+                        logger.info(f"{cdn.upper()}: {stats['requests']} req, "
+                                  f"{stats['hits']} hits ({cdn_hit_rate:.1f}%), "
+                                  f"{stats['bytes']/(1024*1024):.1f} MB")
                 
             except Exception as e:
                 logger.error(f"Fehler beim Aktualisieren der Statistiken: {e}")
@@ -310,6 +324,7 @@ class LanCacheMonitor:
             
             logger.info(f"HTTP Server gestartet auf Port {self.port}")
             logger.info("Monitoring Threads gestartet")
+            logger.info("Warte auf LanCache Log-Daten...")
             
             # HTTP Server ausführen
             httpd.serve_forever()
