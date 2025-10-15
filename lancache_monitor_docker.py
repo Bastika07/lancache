@@ -278,8 +278,8 @@ class LanCacheMonitor:
             time.sleep(30)  # Update alle 30 Sekunden
 
     def create_http_handler(self):
-    """Erstellt HTTP Handler für Metriken"""
-    registry = self.registry
+        """Erstellt HTTP Handler für Metriken"""
+        registry = self.registry
 
     class MetricsHandler(BaseHTTPRequestHandler):
         def do_GET(self):
