@@ -22,8 +22,6 @@ services:
       - ${CACHE_ROOT}/logs:/data/logs
 
   # === MONITORING SERVICES ===
-  
-  # Log-Monitor für Echtzeit-Statistiken
   log-monitor:
     build:
       context: .
@@ -34,19 +32,10 @@ services:
       - ${CACHE_ROOT}/logs:/data/logs:ro
     ports:
       - "9114:9114"
-    depends_on:
-      - monolithic
     environment:
       - LOG_PATH=/data/logs/access.log
       - PROMETHEUS_PORT=9114
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9114/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
-  # Prometheus für Metriken-Sammlung
   prometheus:
     image: prom/prometheus:latest
     restart: *restart-policy
@@ -62,12 +51,7 @@ services:
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
-    depends_on:
-      log-monitor:
-        condition: service_healthy
 
-  # Grafana für Dashboards
   grafana:
     image: grafana/grafana:latest
     restart: *restart-policy
@@ -75,18 +59,12 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
-      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      - prometheus
     user: "472"
 
-  # Web-Stats mit korrekter nginx Konfiguration
   web-stats:
     image: nginx:alpine
     restart: *restart-policy
@@ -94,9 +72,6 @@ services:
       - "8080:80"
     volumes:
       - ./monitoring/web:/usr/share/nginx/html:ro
-    depends_on:
-      - log-monitor
-    command: ["/bin/sh", "-c", "nginx -g 'daemon off;'"]
 
 volumes:
   prometheus-data:
