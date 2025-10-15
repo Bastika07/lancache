@@ -279,7 +279,7 @@ class LanCacheMonitor:
 
     def create_http_handler(self):
         """Erstellt HTTP Handler für Metriken"""
-        registry = self.registry
+    registry = self.registry
 
     class MetricsHandler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -306,7 +306,7 @@ class LanCacheMonitor:
             pass  # Disable HTTP logging
 
     return MetricsHandler
-
+    
     def run(self):
         """Hauptausführung"""
         try:
