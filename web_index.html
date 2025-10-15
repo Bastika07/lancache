@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LanCache Quick Stats</title>
+    <link rel="stylesheet" href="style.css">
+    <script>
+        async function refreshStats() {
+            try {
+                // Direkte Anfrage an den log-monitor Service (Port 9114)
+                const metricsUrl = window.location.protocol + '//' + window.location.hostname + ':9114/metrics';
+                
+                const response = await fetch(metricsUrl, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'text/plain'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const text = await response.text();
+                console.log('Received metrics:', text.substring(0, 200) + '...');
+                
+                // Parse Prometheus metrics
+                const hitRateMatch = text.match(/lancache_hit_rate ([0-9.]+)/);
+                const totalRequestsMatch = text.match(/lancache_requests_total ([0-9]+)/);
+                const totalBytesMatch = text.match(/lancache_bytes_total ([0-9]+)/);
+                
+                // Update Hit Rate
+                if (hitRateMatch) {
+                    const hitRate = (parseFloat(hitRateMatch[1]) * 100).toFixed(1);
+                    document.getElementById('hit-rate').textContent = hitRate + '%';
+                    document.getElementById('hit-rate').className = 'stat-value';
+                } else {
+                    document.getElementById('hit-rate').textContent = 'N/A';
+                    document.getElementById('hit-rate').className = 'stat-value error';
+                }
+                
+                // Update Total Requests
+                if (totalRequestsMatch) {
+                    const requests = parseInt(totalRequestsMatch[1]).toLocaleString();
+                    document.getElementById('total-requests').textContent = requests;
+                    document.getElementById('total-requests').className = 'stat-value';
+                } else {
+                    document.getElementById('total-requests').textContent = 'N/A';
+                    document.getElementById('total-requests').className = 'stat-value error';
+                }
+                
+                // Update Cache Size
+                if (totalBytesMatch) {
+                    const bytes = parseInt(totalBytesMatch[1]);
+                    const gb = bytes / (1024 * 1024 * 1024);
+                    document.getElementById('cache-size').textContent = gb.toFixed(2) + ' GB';
+                    document.getElementById('cache-size').className = 'stat-value';
+                } else {
+                    document.getElementById('cache-size').textContent = 'N/A';
+                    document.getElementById('cache-size').className = 'stat-value error';
+                }
+                
+                // Update timestamp
+                document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('connection-status').className = 'status connected';
+                
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+                
+                // Show error state
+                document.getElementById('hit-rate').textContent = 'Error';
+                document.getElementById('hit-rate').className = 'stat-value error';
+                document.getElementById('total-requests').textContent = 'Error';
+                document.getElementById('total-requests').className = 'stat-value error';
+                document.getElementById('cache-size').textContent = 'Error';  
+                document.getElementById('cache-size').className = 'stat-value error';
+                document.getElementById('last-update').textContent = 'Connection failed';
+                document.getElementById('connection-status').textContent = 'Disconnected';
+                document.getElementById('connection-status').className = 'status disconnected';
+            }
+        }
+        
+        // Auto-refresh every 30 seconds
+        window.onload = function() {
+            refreshStats(); // Initial load
+            setInterval(refreshStats, 30000);
+        };
+        
+        // Manual refresh button
+        function manualRefresh() {
+            refreshStats();
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 LanCache Quick Stats</h1>
+            <div class="status-bar">
+                <span class="status-label">Status: </span>
+                <span id="connection-status" class="status">Connecting...</span>
+                <button onclick="manualRefresh()" class="refresh-btn">🔄 Refresh</button>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Cache Hit Rate</h3>
+                <div class="stat-value" id="hit-rate">Loading...</div>
+                <div class="stat-description">Percentage of requests served from cache</div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>Total Requests</h3>
+                <div class="stat-value" id="total-requests">Loading...</div>
+                <div class="stat-description">All requests processed by cache</div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>Cache Size</h3>
+                <div class="stat-value" id="cache-size">Loading...</div>
+                <div class="stat-description">Total data cached</div>
+            </div>
+        </div>
+        
+        <div class="links">
+            <a href="http://${window.location.hostname}:3000" target="_blank">📊 Grafana Dashboard</a>
+            <a href="http://${window.location.hostname}:9090" target="_blank">🔍 Prometheus</a>
+            <a href="http://${window.location.hostname}:9114/metrics" target="_blank">📈 Raw Metrics</a>
+        </div>
+        
+        <div class="footer">
+            <p>LanCache Monitoring • Last Update: <span id="last-update">-</span></p>
+            <p class="debug-info">Metrics URL: <span id="metrics-url">-</span></p>
+        </div>
+    </div>
+    
+    <script>
+        // Show the metrics URL for debugging
+        document.getElementById('metrics-url').textContent = 
+            window.location.protocol + '//' + window.location.hostname + ':9114/metrics';
+    </script>
+</body>
+</html>
