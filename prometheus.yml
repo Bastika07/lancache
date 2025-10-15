@@ -1,41 +1,28 @@
+# Prometheus Configuration for LanCache Monitoring
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alerting Rules
 rule_files:
   - "rules/*.yml"
 
+# Scrape Configurations
 scrape_configs:
   # LanCache Log Monitor
   - job_name: 'lancache-monitor'
     static_configs:
       - targets: ['log-monitor:9114']
-    scrape_interval: 10s
+    scrape_interval: 30s
     metrics_path: /metrics
-    honor_timestamps: true
     
-  # Prometheus selbst
+  # Prometheus Self-Monitoring
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
-    scrape_interval: 30s
+    scrape_interval: 60s
 
-  # Falls Sie später Nginx-Status-Seite aktivieren möchten
-  # - job_name: 'nginx-status'
-  #   static_configs:
-  #     - targets: ['monolithic:80']
-  #   metrics_path: /nginx_status
-  #   scrape_interval: 15s
-
-# Alerting Konfiguration (optional)
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets:
-          # - alertmanager:9093
-
-# Storage Konfiguration
-storage:
-  tsdb:
-    retention.time: 30d
-    retention.size: 10GB
+# Storage Configuration (done via command line parameters)
+# These settings are configured in docker-compose.yml:
+# --storage.tsdb.retention.time=30d
+# --storage.tsdb.retention.size=10GB
