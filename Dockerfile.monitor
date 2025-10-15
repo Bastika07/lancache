@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install required packages
+RUN pip install --no-cache-dir requests prometheus_client
+
+# Copy monitoring script
+COPY monitoring/lancache_monitor.py /app/
+
+# Create monitoring user
+RUN useradd -r -s /bin/false monitoring && \
+    chown -R monitoring:monitoring /app
+
+USER monitoring
+
+EXPOSE 9114
+
+CMD ["python", "/app/lancache_monitor.py"]

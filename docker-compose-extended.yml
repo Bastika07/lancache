@@ -1,0 +1,94 @@
+x-restart-policy: &restart-policy "unless-stopped"
+
+services:
+  dns:
+    image: lancachenet/lancache-dns:latest
+    env_file: .env
+    restart: *restart-policy
+    ports:
+      - ${DNS_BIND_IP}:53:53/udp
+      - ${DNS_BIND_IP}:53:53/tcp
+
+  monolithic:
+    image: lancachenet/monolithic:latest
+    env_file: .env
+    restart: *restart-policy
+    ports:
+      - 80:80/tcp
+      - 443:443/tcp
+    volumes:
+      - ${CACHE_ROOT}/cache:/data/cache
+      - ${CACHE_ROOT}/logs:/data/logs
+    labels:
+      - "prometheus.io/scrape=true"
+      - "prometheus.io/port=9113"
+
+  # === MONITORING SERVICES ===
+  
+  # Log Monitoring Service
+  log-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    env_file: .env
+    restart: *restart-policy
+    volumes:
+      - ${CACHE_ROOT}/logs:/data/logs:ro
+      - ./monitoring:/app/monitoring
+    depends_on:
+      - monolithic
+    environment:
+      - LOG_PATH=/data/logs/access.log
+      - STATS_INTERVAL=30
+      - PROMETHEUS_PORT=9114
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    restart: *restart-policy
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - log-monitor
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    restart: *restart-policy
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+
+  # Optional: Web interface for quick stats
+  stats-web:
+    image: nginx:alpine
+    restart: *restart-policy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./monitoring/web:/usr/share/nginx/html:ro
+      - ${CACHE_ROOT}/logs:/data/logs:ro
+    depends_on:
+      - log-monitor
+
+volumes:
+  prometheus-data:
+  grafana-data:

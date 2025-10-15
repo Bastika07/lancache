@@ -1,0 +1,45 @@
+
+# LanCache Statistik Report
+Generiert am: 2025-10-15 16:49:14
+
+## Übersicht
+- **Gesamte Requests:** 10,000
+- **Cache Hits:** 7,009
+- **Cache Hit Rate:** 70.09%
+- **Gesamt übertragene Daten:** 78.44 GB
+- **Durch Cache gesparte Bandbreite:** 70.55%
+
+## CDN Performance
+          Total_Bytes  Requests  Cache_Hits  Avg_Response_Time  Hit_Rate_%  Total_GB
+cdn                                                                                 
+blizzard    365840536      1418        1006              0.224       70.94      0.34
+epic      38095753256      1473        1049              0.213       71.22     35.48
+origin      382920152      1411         991              0.227       70.23      0.36
+riot        396523406      1429         990              0.226       69.28      0.37
+steam     38980306414      1478        1019              0.228       68.94     36.30
+uplay       360425675      1355         957              0.227       70.63      0.34
+windows    5643521017      1436         997              0.221       69.43      5.26
+
+## Top Clients (nach Traffic)
+- 192.168.1.105: 3.91 GB
+- 192.168.1.23: 3.26 GB
+- 192.168.1.228: 2.95 GB
+- 192.168.1.175: 1.56 GB
+- 192.168.1.200: 1.39 GB
+- 192.168.1.48: 1.38 GB
+- 192.168.1.121: 1.33 GB
+- 192.168.1.107: 1.33 GB
+- 192.168.1.130: 1.27 GB
+- 192.168.1.204: 1.26 GB
+
+
+## Empfehlungen
+- Cache Hit Rate von 70.1% ist gut
+- Bandbreiten-Einsparung: 70.5%
+- Durchschnittliche Response Time für Cache Hits: 0.101s
+- Durchschnittliche Response Time für Cache Misses: 0.510s
+
+## Konfigurationsvorschläge
+1. **Cache Größe optimieren:** Aktuelle Einstellung prüfen
+2. **Beliebte CDNs priorisieren:** steam generiert am meisten Traffic
+3. **Monitoring verstärken:** Regelmäßige Überprüfung der Hit Rate

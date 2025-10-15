@@ -1,0 +1,70 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "LanCache Statistics",
+    "tags": ["lancache"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Cache Hit Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "lancache_hit_rate * 100",
+            "legendFormat": "Hit Rate %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Total Requests",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(lancache_requests_total[5m]) * 60",
+            "legendFormat": "Requests/min"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Data Served by CDN",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "lancache_cdn_bytes_total",
+            "legendFormat": "{{cdn}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Request Rate by CDN",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(lancache_cdn_requests_total[5m])",
+            "legendFormat": "{{cdn}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}

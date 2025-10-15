@@ -20,7 +20,7 @@ scrape_configs:
       - targets: ['localhost:9090']
     scrape_interval: 30s
 
-  # Falls Sie spÃ¤ter Nginx-Status-Seite aktivieren mÃ¶chten
+  # Falls Sie später Nginx-Status-Seite aktivieren möchten
   # - job_name: 'nginx-status'
   #   static_configs:
   #     - targets: ['monolithic:80']
