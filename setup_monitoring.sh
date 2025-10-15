@@ -405,7 +405,7 @@ echo "✅ LanCache Monitoring Setup abgeschlossen!"
 
 # Teste Docker-Compose Konfiguration
 echo "🧪 Teste Docker-Compose Konfiguration..."
-if docker-compose config > /dev/null 2>&1; then
+if docker compose config > /dev/null 2>&1; then
     echo "✅ Docker-Compose Konfiguration ist gültig"
 else
     echo "❌ Docker-Compose Konfiguration hat Fehler!"
