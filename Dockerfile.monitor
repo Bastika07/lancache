@@ -6,7 +6,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir requests prometheus_client
 
 # Copy monitoring script
-COPY monitoring/lancache_monitor_docker.py /app/
+COPY lancache_monitor_docker.py /app/
 
 # Create monitoring user
 RUN useradd -r -s /bin/false monitoring && \
@@ -16,4 +16,4 @@ USER monitoring
 
 EXPOSE 9114
 
-CMD ["python", "/app/lancache_monitor.py"]
+CMD ["python", "/app/lancache_monitor_docker.py"]
