@@ -30,7 +30,7 @@ mkdir -p monitoring/{prometheus/rules,grafana/provisioning/{datasources,dashboar
 echo "📋 Kopiere Konfigurationsdateien..."
 
 # Prometheus Konfiguration
-cp prometheus_updated.yml monitoring/prometheus/prometheus.yml
+cp prometheus.yml monitoring/prometheus/prometheus.yml
 
 # Alert Rules
 cp lancache_alert_rules.yml monitoring/prometheus/rules/
