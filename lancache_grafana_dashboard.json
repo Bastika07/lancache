@@ -199,7 +199,7 @@
         {
           "expr": "lancache_cdn_bytes_total",
           "interval": "",
-          "legendFormat": "{{cdn}}",
+          "legendFormat": "{hit_status}},{{cdn}}",
           "refId": "A"
         }
       ],
@@ -268,13 +268,13 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "rate(lancache_hits_total[5m])",
+          "expr": "rate(lancache_cache_hits_total[5m])",
           "interval": "",
           "legendFormat": "Cache Hits",
           "refId": "A"
         },
         {
-          "expr": "rate(lancache_misses_total[5m])",
+          "expr": "rate(lancache_cache_misses_total[5m])",
           "interval": "",
           "legendFormat": "Cache Misses",
           "refId": "B"
