@@ -276,36 +276,36 @@ class LanCacheMonitor:
                 logger.error(f"Fehler beim Aktualisieren der Statistiken: {e}")
             
             time.sleep(30)  # Update alle 30 Sekunden
-
+            
     def create_http_handler(self):
         """Erstellt HTTP Handler für Metriken"""
-    registry = self.registry
+        registry = self.registry
 
-    class MetricsHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path == '/metrics':
-                output = generate_latest(registry)
-                self.send_response(200)
-                self.send_header('Content-Type', CONTENT_TYPE_LATEST)
-                self.send_header('Content-Length', str(len(output)))
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(output)
-            elif self.path == '/health':
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/plain')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(b'OK')
-            else:
-                self.send_response(404)
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
+        class MetricsHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/metrics':
+                    output = generate_latest(registry)
+                    self.send_response(200)
+                    self.send_header('Content-Type', CONTENT_TYPE_LATEST)
+                    self.send_header('Content-Length', str(len(output)))
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(output)
+                elif self.path == '/health':
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(b'OK')
+                else:
+                    self.send_response(404)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
 
-        def log_message(self, format, *args):
-            pass  # Disable HTTP logging
+            def log_message(self, format, *args):
+                pass  # Disable HTTP logging
 
-    return MetricsHandler
+        return MetricsHandler
     
     def run(self):
         """Hauptausführung"""
