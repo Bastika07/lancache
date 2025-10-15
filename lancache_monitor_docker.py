@@ -276,7 +276,7 @@ class LanCacheMonitor:
                 logger.error(f"Fehler beim Aktualisieren der Statistiken: {e}")
             
             time.sleep(30)  # Update alle 30 Sekunden
-            
+        
     def create_http_handler(self):
         """Erstellt HTTP Handler für Metriken"""
         registry = self.registry
@@ -305,8 +305,8 @@ class LanCacheMonitor:
             def log_message(self, format, *args):
                 pass  # Disable HTTP logging
 
-        return MetricsHandler
-    
+    return MetricsHandler
+
     def run(self):
         """Hauptausführung"""
         try:
