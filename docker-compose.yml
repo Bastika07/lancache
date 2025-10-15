@@ -23,7 +23,7 @@ services:
 
   # === MONITORING SERVICES ===
   
-  # Log-Monitor fÃ¼r Echtzeit-Statistiken
+  # Log-Monitor für Echtzeit-Statistiken
   log-monitor:
     build:
       context: .
@@ -46,7 +46,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Prometheus fÃ¼r Metriken-Sammlung
+  # Prometheus für Metriken-Sammlung
   prometheus:
     image: prom/prometheus:latest
     restart: *restart-policy
@@ -67,7 +67,7 @@ services:
       log-monitor:
         condition: service_healthy
 
-  # Grafana fÃ¼r Dashboards
+  # Grafana für Dashboards
   grafana:
     image: grafana/grafana:latest
     restart: *restart-policy
