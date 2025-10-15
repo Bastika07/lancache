@@ -99,10 +99,11 @@ class LanCacheMonitor:
             'generic': []
         }
         
-        # Statistiken
+        # Manuelle Statistiken (da wir nicht auf _value zugreifen können)
         self.start_time = time.time()
         self.total_requests = 0
         self.total_hits = 0
+        self.total_bytes_served = 0
         self.recent_requests = deque(maxlen=1000)
         
         # Setze initiale Werte
@@ -127,7 +128,7 @@ class LanCacheMonitor:
     def parse_log_line(self, line: str):
         """Parst nginx Access-Log Zeile"""
         # Nginx Combined Log Format
-        pattern = r'^(\S+) - - \[(.*?)\] "(\S+) (.*?) (\S+)" (\d+) (\d+) "(.*?)" "(.*?)"'
+        pattern = r'^(S+) - - [(.*?)] "(S+) (.*?) (S+)" (d+) (d+) "(.*?)" "(.*?)"'
         match = re.match(pattern, line.strip())
         
         if not match:
@@ -187,6 +188,7 @@ class LanCacheMonitor:
         
         if bytes_served > 0:
             self.bytes_total.labels(cdn=cdn).inc(bytes_served)
+            self.total_bytes_served += bytes_served
         
         # Cache Hit/Miss Tracking
         if self.is_cache_hit(request):
@@ -248,13 +250,12 @@ class LanCacheMonitor:
                                  if (cutoff - r['timestamp']).seconds < 60)
                 self.active_connections.set(recent_count)
                 
-                # Cache-Größe schätzen (basierend auf gesamten Bytes)
-                total_bytes = sum(self.bytes_total._value._values.values())
-                self.cache_size_bytes.set(total_bytes)
+                # Cache-Größe aus manueller Tracking (da wir nicht auf Counter._value zugreifen können)
+                self.cache_size_bytes.set(self.total_bytes_served)
                 
                 logger.info(f"Stats - Requests: {self.total_requests}, "
                           f"Hits: {self.total_hits}, "
-                          f"Hit Rate: {self.hit_rate._value.get()*100:.1f}%, "
+                          f"Hit Rate: {(self.total_hits/max(self.total_requests,1))*100:.1f}%, "
                           f"Recent: {recent_count}")
                 
             except Exception as e:
