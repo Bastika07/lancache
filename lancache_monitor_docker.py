@@ -305,7 +305,7 @@ class LanCacheMonitor:
             def log_message(self, format, *args):
                 pass  # Disable HTTP logging
 
-    return MetricsHandler
+        return MetricsHandler
 
     def run(self):
         """Hauptausführung"""
