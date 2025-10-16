@@ -280,7 +280,7 @@ class LanCacheMonitor:
     def create_http_handler(self):
         """Erstellt HTTP Handler für Metriken"""
         registry = self.registry
-
+        
         class MetricsHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 if self.path == '/metrics':
@@ -293,7 +293,7 @@ class LanCacheMonitor:
                     self.wfile.write(output)
                 elif self.path == '/health':
                     self.send_response(200)
-                    self.send_header('Content-Type', 'text/plain')
+                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     self.wfile.write(b'OK')
@@ -303,7 +303,8 @@ class LanCacheMonitor:
                     self.end_headers()
 
             def log_message(self, format, *args):
-                pass  # Disable HTTP logging
+                return  # Disable HTTP logging
+
         return MetricsHandler
 
     def run(self):
