@@ -197,7 +197,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "lancache_cdn_bytes_total",
+          "expr": "lancache_bytes_total",
           "interval": "",
           "legendFormat": "{hit_status}},{{cdn}}",
           "refId": "A"
