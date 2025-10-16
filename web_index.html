@@ -224,7 +224,7 @@
                 if (line.startsWith('#') || !line.trim()) return;
 
                 // Parse Metrik-Zeile: metric_name{labels} value
-                const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*?\})?\s+([\d\.-]+)$/);
+                const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*?\})?\s+([\d\.\-]+(?:e[\+\-]?\d+)?)$/i);
                 if (!match) return;
 
                 const [, name, labelsStr, value] = match;
@@ -239,7 +239,27 @@
 
             return metrics;
         }
+        function parsePrometheusValue(valueStr) {
+            const cleanValue = String(valueStr).replace(/['"]/g, '').trim();
+    
+            if (cleanValue.includes('e') || cleanValue.length > 10) {
+                console.log('Parsing large/scientific number:', cleanValue);
+        }
+    
+        const parsed = parseFloat(cleanValue);
+        return isNaN(parsed) ? 0 : parsed;
+    }
 
+        function parseMetrics(metricsText) {
+            // Suche nach neuer bytes_served_total Metrik
+            const bytesMatch = metricsText.match(/lancache_bytes_served_total\s+([\d\.e\+\-]+)/i);
+    
+            if (bytesMatch) {
+                const bytesValue = parsePrometheusValue(bytesMatch[1]);
+                document.getElementById('totalBytes').textContent = formatBytes(bytesValue);
+            }
+        }
+    
         // Labels parsen
         function parseLabels(labelsStr) {
             const labels = {};
@@ -326,10 +346,17 @@
         }
 
         function updateBytesServed(metrics) {
-            const bytes = metrics['lancache_bytes_total'] || [];
-            const totalBytes = bytes.reduce((sum, metric) => sum + metric.value, 0);
+            console.log('=== BYTES SERVED DEBUG ===');
+    
+            let totalBytes = 0;
+            if (metrics['lancache_bytes_served_total']?.length > 0) {
+                totalBytes = metrics['lancache_bytes_served_total'][0].value;
+                console.log('Found bytes_served_total:', totalBytes);
+            }
+    
             document.getElementById('bytesServed').textContent = formatBytes(totalBytes);
-        }
+    }
+
 
         function updateActiveConnections(metrics) {
             const connections = metrics['lancache_active_connections'];
