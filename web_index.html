@@ -271,12 +271,6 @@
             document.getElementById('trafficRatio').textContent = `1:${ratio}`;
             document.getElementById('ratioDetail').textContent = `${internetRatio.toFixed(1)}GB : ${cacheRatio.toFixed(1)}GB`;
             
-            // Cost Savings (Beispielrechnung: €0.10/GB)
-            const costPerGB = 0.10; // Euro pro GB
-            const monthlySavings = (totalHit / (1024 * 1024 * 1024)) * costPerGB;
-            document.getElementById('costSavings').textContent = `€${monthlySavings.toFixed(2)}`;
-            document.getElementById('costDetail').textContent = `At €${costPerGB}/GB rate`;
-            
             console.log('=== BANDWIDTH METRICS COMPLETE ===');
         }
 
