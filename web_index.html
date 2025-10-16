@@ -67,6 +67,47 @@
             </div>
         </div>
 
+        <!-- Bandwidth Savings Section -->
+        <div class="section-separator">💰 BANDWIDTH SAVINGS</div>
+        
+        <div class="stats-grid">
+            <!-- Bandwidth Savings Cards -->
+            <div class="stat-card internet-card">
+                <h3>📥 Internet Downloads</h3>
+                <div class="stat-value" id="internetDownloads">-</div>
+                <div class="stat-label">Cache Downloaded</div>
+                <div class="stat-detail" id="internetDownloadsDetail">From upstream</div>
+            </div>
+
+            <div class="stat-card savings-card">
+                <h3>🔄 Cache Served</h3>
+                <div class="stat-value" id="cacheServed">-</div>
+                <div class="stat-label">Local Cache Hits</div>
+                <div class="stat-detail" id="cacheServedDetail">Served locally</div>
+            </div>
+
+            <div class="stat-card highlight-card">
+                <h3>💰 Bandwidth Saved</h3>
+                <div class="stat-value savings-highlight" id="bandwidthSaved">-</div>
+                <div class="stat-label">Total Savings</div>
+                <div class="stat-detail" id="savingsDetail">Internet traffic avoided</div>
+            </div>
+
+            <div class="stat-card efficiency-card">
+                <h3>📊 Efficiency Rate</h3>
+                <div class="stat-value" id="efficiencyRate">-</div>
+                <div class="stat-label">Bandwidth Efficiency</div>
+                <div class="stat-detail" id="efficiencyDetail">Traffic reduction</div>
+            </div>
+
+            <div class="stat-card ratio-card">
+                <h3>⚖️ Internet vs Cache</h3>
+                <div class="stat-value" id="trafficRatio">-</div>
+                <div class="stat-label">Traffic Ratio</div>
+                <div class="stat-detail" id="ratioDetail">Internet : Cache</div>
+            </div>
+        </div>
+
         <!-- CDN-spezifische Statistiken -->
         <div class="section">
             <h2>📦 CDN-spezifische Statistiken</h2>
@@ -174,6 +215,71 @@
             });
         }
 
+        // NEUE BANDWIDTH SAVINGS FUNKTIONEN
+        function updateBandwidthMetrics(metrics) {
+            console.log('=== BANDWIDTH METRICS UPDATE ===');
+            
+            // Extrahiere bytes_total Metriken nach hit_status
+            const bytesMetrics = metrics['lancache_bytes_total'] || [];
+            
+            let totalMiss = 0;
+            let totalHit = 0;
+            let totalBypass = 0;
+            
+            bytesMetrics.forEach(metric => {
+                const hitStatus = metric.labels.hit_status;
+                const bytes = metric.value;
+                
+                switch(hitStatus) {
+                    case 'MISS':
+                        totalMiss += bytes;
+                        break;
+                    case 'HIT':
+                        totalHit += bytes;
+                        break;
+                    case 'BYPASS':
+                        totalBypass += bytes;
+                        break;
+                }
+            });
+            
+            console.log('Bytes MISS:', totalMiss);
+            console.log('Bytes HIT:', totalHit);
+            console.log('Bytes BYPASS:', totalBypass);
+            
+            // Berechnungen
+            const totalServed = totalMiss + totalHit + totalBypass;
+            const savingsRatio = totalMiss + totalHit > 0 ? (totalHit / (totalMiss + totalHit)) * 100 : 0;
+            const internetRatio = totalMiss / (1024 * 1024 * 1024); // GB
+            const cacheRatio = totalHit / (1024 * 1024 * 1024); // GB
+            
+            // Update UI
+            document.getElementById('internetDownloads').textContent = formatBytes(totalMiss);
+            document.getElementById('internetDownloadsDetail').textContent = `${formatNumber(totalMiss / (1024 * 1024))} MB downloaded`;
+            
+            document.getElementById('cacheServed').textContent = formatBytes(totalHit);
+            document.getElementById('cacheServedDetail').textContent = `${formatNumber(totalHit / (1024 * 1024))} MB from cache`;
+            
+            document.getElementById('bandwidthSaved').textContent = formatBytes(totalHit);
+            document.getElementById('savingsDetail').textContent = `${savingsRatio.toFixed(1)}% traffic reduction`;
+            
+            document.getElementById('efficiencyRate').textContent = `${savingsRatio.toFixed(1)}%`;
+            document.getElementById('efficiencyDetail').textContent = `${(100 - savingsRatio).toFixed(1)}% internet usage`;
+            
+            // Traffic Ratio
+            const ratio = internetRatio > 0 ? (cacheRatio / internetRatio).toFixed(1) : '∞';
+            document.getElementById('trafficRatio').textContent = `1:${ratio}`;
+            document.getElementById('ratioDetail').textContent = `${internetRatio.toFixed(1)}GB : ${cacheRatio.toFixed(1)}GB`;
+            
+            // Cost Savings (Beispielrechnung: €0.10/GB)
+            const costPerGB = 0.10; // Euro pro GB
+            const monthlySavings = (totalHit / (1024 * 1024 * 1024)) * costPerGB;
+            document.getElementById('costSavings').textContent = `€${monthlySavings.toFixed(2)}`;
+            document.getElementById('costDetail').textContent = `At €${costPerGB}/GB rate`;
+            
+            console.log('=== BANDWIDTH METRICS COMPLETE ===');
+        }
+
         // Metriken abrufen und parsen
         async function fetchMetrics() {
             const metricsUrl = document.getElementById('metricsUrl').textContent || CONFIG.metricsUrl;
@@ -232,16 +338,17 @@
 
             return metrics;
         }
+
         function parsePrometheusValue(valueStr) {
             const cleanValue = String(valueStr).replace(/['"]/g, '').trim();
     
             if (cleanValue.includes('e') || cleanValue.length > 10) {
                 console.log('Parsing large/scientific number:', cleanValue);
-        }
+            }
     
-        const parsed = parseFloat(cleanValue);
-        return isNaN(parsed) ? 0 : parsed;
-    }
+            const parsed = parseFloat(cleanValue);
+            return isNaN(parsed) ? 0 : parsed;
+        }
 
         function parseMetrics(metricsText) {
             // Suche nach neuer bytes_served_total Metrik
@@ -269,11 +376,11 @@
             return labels;
         }
 
-        // UI aktualisieren
+        // UI aktualisieren (ERWEITERT)
         function updateUI(metrics) {
             metricsData = metrics;
 
-            // Gesamt-Statistiken
+            // Bestehende Updates
             updateTotalRequests(metrics);
             updateHitRate(metrics);
             updateCacheStats(metrics);
@@ -281,6 +388,9 @@
             updateActiveConnections(metrics);
             updateUptime(metrics);
             updateCDNStats(metrics);
+            
+            // ✅ NEU: Bandwidth Savings
+            updateBandwidthMetrics(metrics);
 
             // Charts aktualisieren
             updateCharts(metrics);
@@ -348,8 +458,7 @@
             }
     
             document.getElementById('bytesServed').textContent = formatBytes(totalBytes);
-    }
-
+        }
 
         function updateActiveConnections(metrics) {
             const connections = metrics['lancache_active_connections'];
