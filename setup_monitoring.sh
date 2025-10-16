@@ -63,6 +63,41 @@ cp web_index.html monitoring/web/index.html
 # Erstelle erweiterte CSS
 cp web_style.css monitoring/web/style.css 
 
+echo "📝 Generating config.js directly..."
+source .env
+cat > web_config.js << EOF
+const CONFIG = {
+    metricsUrl: '/metrics',
+    fallbackUrl: 'http://$LANCACHE_IP:9114/metrics',
+    updateInterval: 10000,
+    maxDataPoints: 50,
+    lancacheIP: '$LANCACHE_IP'
+};
+
+console.log('Dashboard configured for LanCache IP:', CONFIG.lancacheIP);
+EOF
+
+echo "✅ Config generated successfully!"
+
+# 4. Validation
+echo ""
+echo "📋 VALIDATION:"
+if [ -f web_config.js ]; then
+    echo "✅ config.js exists"
+    echo "Content:"
+    cat web_config.js
+    echo ""
+    
+    if grep -q "http://$LANCACHE_IP:9114" web_config.js; then
+        echo "✅ IP correctly inserted: $LANCACHE_IP"
+    else
+        echo "❌ Something went wrong"
+    fi
+else
+    echo "❌ config.js not generated"
+fi
+mv web_config.js monitoring/web/web_config.js
+
 # Setze korrekte Berechtigungen
 echo "🔐 Setze Berechtigungen..."
 find monitoring/ -type f -exec chmod 644 {} \;

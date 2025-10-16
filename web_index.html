@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LanCache Monitor Dashboard</title>
+    <script src="config.js"></script>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -113,14 +114,6 @@
     </div>
 
     <script>
-        // Konfiguration
-        const CONFIG = {
-            metricsUrl: '/metrics',  // Relativer Pfad für Proxy
-            fallbackUrl: 'http://192.168.100.117:9114/metrics',  // Fallback
-            updateInterval: 10000,
-            maxDataPoints: 50
-        };
-
         // Globale Variablen
         let metricsData = {};
         let updateTimer;
