@@ -199,7 +199,7 @@
         {
           "expr": "lancache_bytes_total",
           "interval": "",
-          "legendFormat": "{hit_status}},{{cdn}}",
+          "legendFormat": "{{hit_status}},{{cdn}}",
           "refId": "A"
         }
       ],
