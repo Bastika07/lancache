@@ -4,32 +4,12 @@ Diese Dateien erweitern Ihr bestehendes lancachenet Setup um umfassendes Monitor
 
 ## Installation
 
-1. **Backup Ihrer aktuellen Dateien:**
-   ```bash
-   cp docker-compose.yml docker-compose.yml.backup
-   cp .env .env.backup
-   ```
-
-2. **Neue Dateien kopieren:**
-   ```bash
-   # Ersetzen Sie Ihre docker-compose.yml
-   cp docker-compose-extended.yml docker-compose.yml
-   
-   # Passen Sie Ihre .env an (oder verwenden Sie .env.example als Basis)
-   ```
-
-3. **Monitoring-Verzeichnisse erstellen:**
-   ```bash
-   chmod +x setup_monitoring.sh
-   ./setup_monitoring.sh
-   ```
-
-4. **Konfiguration anpassen:**
+1. **Konfiguration anpassen:**
    - Bearbeiten Sie `.env` und setzen Sie Ihre IP-Adressen
    - Passen Sie `CACHE_ROOT` an Ihren gewünschten Speicherort an
    - Setzen Sie `CACHE_DISK_SIZE` entsprechend Ihrem verfügbaren Speicher
 
-5. **System starten:**
+2. **System starten:**
    ```bash
    docker-compose up -d
    ```
