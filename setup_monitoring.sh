@@ -67,8 +67,8 @@ echo "📝 Generating config.js directly..."
 source .env
 cat > web_config.js << EOF
 const CONFIG = {
-    metricsUrl: '/metrics',
-    fallbackUrl: 'http://$LANCACHE_IP:9114/metrics',
+    metricsUrl: 'http://$LANCACHE_IP:9114/metrics',
+    fallbackUrl: '/metrics',
     updateInterval: 10000,
     maxDataPoints: 50,
     lancacheIP: '$LANCACHE_IP'
