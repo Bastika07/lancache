@@ -74,6 +74,13 @@ class LanCacheMonitor:
             registry=self.registry
         )
         
+        # ✅ NEU: Dashboard-kompatible Bytes-Metrik (ohne wissenschaftliche Notation)
+        self.bytes_served_total = Gauge(
+            'lancache_bytes_served_total',
+            'Total bytes served by LanCache (dashboard compatible)',
+            registry=self.registry
+        )
+        
         self.uptime_seconds = Gauge(
             'lancache_uptime_seconds',
             'Monitor uptime in seconds',
@@ -94,6 +101,7 @@ class LanCacheMonitor:
         self.hit_rate.set(0.0)
         self.active_connections.set(0)
         self.cache_size_bytes.set(0)
+        self.bytes_served_total.set(0)  # ✅ NEU: Initialisiere Dashboard-Metrik
         
         logger.info(f"LanCache Monitor gestartet auf Port {self.port}")
         logger.info(f"Überwache Log: {self.log_path}")
@@ -256,31 +264,39 @@ class LanCacheMonitor:
                                  if (cutoff - r['timestamp']).seconds < 60)
                 self.active_connections.set(recent_count)
                 
-                # Cache-Größe setzen
-                self.cache_size_bytes.set(self.total_bytes_served)
+                # ✅ GEÄNDERT: Explizite Konvertierung für große Zahlen (vermeidet wissenschaftliche Notation)
+                total_bytes = int(self.total_bytes_served)
+                self.cache_size_bytes.set(total_bytes)
                 
+                # ✅ NEU: Dashboard-kompatible Bytes-Metrik setzen
+                self.bytes_served_total.set(total_bytes)
+                
+                # ✅ VERBESSERTES LOGGING: Zeige Bytes in GB
+                gb_served = total_bytes / (1024 * 1024 * 1024)
                 logger.info(f"Stats - Requests: {self.total_requests}, "
                           f"Hits: {self.total_hits}, "
                           f"Hit Rate: {(self.total_hits/max(self.total_requests,1))*100:.1f}%, "
+                          f"Bytes Served: {gb_served:.1f} GB, "
                           f"Recent: {recent_count}")
                 
                 # CDN-Statistiken loggen
                 for cdn, stats in self.cdn_stats.items():
                     if stats['requests'] > 0:
                         cdn_hit_rate = (stats['hits'] / stats['requests']) * 100
+                        cdn_gb = stats['bytes'] / (1024 * 1024 * 1024)
                         logger.info(f"{cdn.upper()}: {stats['requests']} req, "
                                   f"{stats['hits']} hits ({cdn_hit_rate:.1f}%), "
-                                  f"{stats['bytes']/(1024*1024):.1f} MB")
+                                  f"{cdn_gb:.1f} GB")
                 
             except Exception as e:
                 logger.error(f"Fehler beim Aktualisieren der Statistiken: {e}")
             
             time.sleep(30)  # Update alle 30 Sekunden
-        
+            
     def create_http_handler(self):
         """Erstellt HTTP Handler für Metriken"""
         registry = self.registry
-        
+
         class MetricsHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 if self.path == '/metrics':
@@ -293,7 +309,7 @@ class LanCacheMonitor:
                     self.wfile.write(output)
                 elif self.path == '/health':
                     self.send_response(200)
-                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                    self.send_header('Content-Type', 'text/plain')
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     self.wfile.write(b'OK')
@@ -303,10 +319,10 @@ class LanCacheMonitor:
                     self.end_headers()
 
             def log_message(self, format, *args):
-                return  # Disable HTTP logging
+                pass  # Disable HTTP logging
 
         return MetricsHandler
-
+    
     def run(self):
         """Hauptausführung"""
         try:
