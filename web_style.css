@@ -362,7 +362,7 @@ header h1 {
 /* NEUE BANDWIDTH SAVINGS STYLES */
 
 .savings-card {
-    background: linear-gradient(135deg, #4CAF50, #45a049);
+    
     color: white;
 }
 
@@ -374,12 +374,12 @@ header h1 {
 }
 
 .efficiency-card {
-    background: linear-gradient(135deg, #2196F3, #1976D2);
+    
     color: white;
 }
 
 .ratio-card {
-    background: linear-gradient(135deg, #9C27B0, #7B1FA2);
+    
     color: white;
 }
 
@@ -407,7 +407,7 @@ header h1 {
     font-style: italic;
 }
 
-/* Responsive Grid fÃ¼r mehr Cards */
+/* Responsive Grid für mehr Cards */
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
