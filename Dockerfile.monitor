@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install packages
+RUN pip install --no-cache-dir requests prometheus_client
+
+# Copy script
+COPY lancache_monitor_docker.py /app/monitor.py
+
+# Make executable
+RUN chmod +x /app/monitor.py
+
+# Create directories
+RUN mkdir -p /data/logs
+
+EXPOSE 9114
+
+# Simple startup without health checks
+CMD ["python", "/app/monitor.py"]
