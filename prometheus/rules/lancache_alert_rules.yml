@@ -1,0 +1,29 @@
+groups:
+  - name: lancache_alerts
+    rules:
+      - alert: LanCacheDown
+        expr: up{job="lancache-monitor"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LanCache Monitor is down"
+          description: "LanCache monitoring service has been down for more than 2 minutes."
+          
+      - alert: LowHitRate
+        expr: lancache_hit_rate < 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LanCache hit rate is low"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} which is below 50%."
+          
+      - alert: HighRequestVolume
+        expr: rate(lancache_requests_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: info
+        annotations:
+          summary: "High request volume detected"
+          description: "Request rate is {{ $value }} requests/second."
