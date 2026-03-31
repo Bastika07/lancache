@@ -1,353 +1,306 @@
 #!/usr/bin/env python3
-import os
-import time
-import threading
-import re
-from collections import deque
+import os, time, threading, re, json
+from collections import deque, defaultdict
 from datetime import datetime
-from prometheus_client import start_http_server, Counter, Gauge, Histogram, CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest
+from urllib.request import urlopen
+from urllib.error import URLError
+from prometheus_client import Counter, Gauge, CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+STEAM_CACHE_FILE = '/tmp/steam_names.json'
+
+def load_steam_cache():
+    try:
+        with open(STEAM_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_steam_cache(cache):
+    try:
+        with open(STEAM_CACHE_FILE, 'w') as f:
+            json.dump(cache, f)
+    except Exception:
+        pass
+
+def resolve_steam_name(depot_id, cache):
+    key = str(depot_id)
+    if key in cache:
+        return cache[key]
+    # Versuche depot_id direkt als App-ID, dann depot_id-1 bis depot_id-5
+    for app_id in [depot_id] + list(range(depot_id - 1, depot_id - 6, -1)):
+        if app_id <= 0:
+            continue
+        try:
+            url = f'https://store.steampowered.com/api/appdetails?appids={app_id}&filters=basic'
+            with urlopen(url, timeout=5) as r:
+                data = json.loads(r.read())
+            info = data.get(str(app_id), {})
+            if info.get('success') and info.get('data', {}).get('name'):
+                name = info['data']['name']
+                cache[key] = name
+                save_steam_cache(cache)
+                logger.info(f"Depot {depot_id} → App {app_id} → {name}")
+                return name
+        except Exception:
+            pass
+    name = f'Depot {depot_id}'
+    cache[key] = name
+    save_steam_cache(cache)
+    return name
+
+
 class LanCacheMonitor:
     def __init__(self):
         self.port = int(os.getenv('PROMETHEUS_PORT', '9114'))
         self.log_path = os.getenv('LOG_PATH', '/data/logs/access.log')
-        
-        # Erstelle eigene Registry für saubere Metriken
         self.registry = CollectorRegistry()
-        
-        # Definiere LanCache-spezifische Metriken mit korrekten Typen
-        self.requests_total = Counter(
-            'lancache_requests_total', 
-            'Total number of requests processed by LanCache',
-            ['status', 'method', 'cdn'],
-            registry=self.registry
-        )
-        
-        self.bytes_total = Counter(
-            'lancache_bytes_total',
-            'Total bytes served by LanCache',
-            ['cdn', 'hit_status'],
-            registry=self.registry
-        )
-        
-        self.cache_hits = Counter(
-            'lancache_cache_hits_total',
-            'Total cache hits',
-            ['cdn'],
-            registry=self.registry
-        )
-        
-        self.cache_misses = Counter(
-            'lancache_cache_misses_total', 
-            'Total cache misses',
-            ['cdn'],
-            registry=self.registry
-        )
-        
-        self.hit_rate = Gauge(
-            'lancache_hit_rate',
-            'Cache hit rate (0-1)',
-            registry=self.registry
-        )
-        
-        self.hit_rate_by_cdn = Gauge(
-            'lancache_hit_rate_by_cdn',
-            'Cache hit rate by CDN (0-1)',
-            ['cdn'],
-            registry=self.registry
-        )
-        
-        self.active_connections = Gauge(
-            'lancache_active_connections',
-            'Current active connections',
-            registry=self.registry
-        )
-        
-        self.cache_size_bytes = Gauge(
-            'lancache_cache_size_bytes',
-            'Current cache size in bytes',
-            registry=self.registry
-        )
-        
-        # ✅ NEU: Dashboard-kompatible Bytes-Metrik (ohne wissenschaftliche Notation)
-        self.bytes_served_total = Gauge(
-            'lancache_bytes_served_total',
-            'Total bytes served by LanCache (dashboard compatible)',
-            registry=self.registry
-        )
-        
-        self.uptime_seconds = Gauge(
-            'lancache_uptime_seconds',
-            'Monitor uptime in seconds',
-            registry=self.registry
-        )
-        
-        # Statistiken-Tracking
+
+        self.requests_total     = Counter('lancache_requests_total',    'Total requests',         ['status', 'method', 'cdn'], registry=self.registry)
+        self.bytes_total        = Counter('lancache_bytes_total',       'Total bytes served',     ['cdn', 'hit_status'],       registry=self.registry)
+        self.cache_hits         = Counter('lancache_cache_hits_total',  'Total cache hits',       ['cdn'],                    registry=self.registry)
+        self.cache_misses       = Counter('lancache_cache_misses_total','Total cache misses',     ['cdn'],                    registry=self.registry)
+        self.hit_rate           = Gauge('lancache_hit_rate',            'Cache hit rate (0-1)',                               registry=self.registry)
+        self.hit_rate_by_cdn    = Gauge('lancache_hit_rate_by_cdn',     'Hit rate by CDN (0-1)', ['cdn'],                    registry=self.registry)
+        self.active_connections = Gauge('lancache_active_connections',  'Active connections',                                registry=self.registry)
+        self.cache_size_bytes   = Gauge('lancache_cache_size_bytes',    'Cache size bytes',                                  registry=self.registry)
+        self.bytes_served_total = Gauge('lancache_bytes_served_total',  'Total bytes served',                                registry=self.registry)
+        self.uptime_seconds     = Gauge('lancache_uptime_seconds',      'Monitor uptime',                                    registry=self.registry)
+
         self.start_time = time.time()
-        self.total_requests = 0
-        self.total_hits = 0
-        self.total_bytes_served = 0
+        self.total_requests = self.total_hits = self.total_bytes_served = 0
         self.recent_requests = deque(maxlen=1000)
-        
-        # CDN-spezifische Statistiken
         self.cdn_stats = {}
-        
-        # Setze initiale Werte
-        self.hit_rate.set(0.0)
-        self.active_connections.set(0)
-        self.cache_size_bytes.set(0)
-        self.bytes_served_total.set(0)  # ✅ NEU: Initialisiere Dashboard-Metrik
-        
+
+        # Depot-Tracking
+        self.depot_stats = defaultdict(lambda: {'bytes_hit': 0, 'bytes_miss': 0, 'hits': 0, 'misses': 0})
+        self.steam_name_cache = load_steam_cache()
+        self.name_resolve_queue = set()
+        self.lock = threading.Lock()
+
+        for g in [self.hit_rate, self.active_connections, self.cache_size_bytes, self.bytes_served_total]:
+            g.set(0)
+
         logger.info(f"LanCache Monitor gestartet auf Port {self.port}")
-        logger.info(f"Überwache Log: {self.log_path}")
+        logger.info(f"Ueberwache Log: {self.log_path}")
 
-    def parse_lancache_log_line(self, line: str):
-        """Parst LanCache-spezifisches Log-Format"""
-        # LanCache Format: [cdn] ip / - - - [timestamp] "method url protocol" status bytes "referrer" "user_agent" "hit_status" "upstream" "-"
+    def parse_lancache_log_line(self, line):
         pattern = r'\[([^\]]+)\] (\S+) / - - - \[([^\]]+)\] "([^"]+)" (\d+) (\d+) "([^"]*)" "([^"]*)" "([^"]*)" "([^"]*)" "-"'
-        
-        match = re.match(pattern, line.strip())
-        
-        if not match:
-            # Fallback für andere Formate
-            logger.debug(f"Konnte Log-Zeile nicht parsen: {line[:100]}...")
+        m = re.match(pattern, line.strip())
+        if not m:
             return None
-            
         try:
-            # Parse HTTP Request
-            request_parts = match.group(4).split(' ')
-            if len(request_parts) >= 3:
-                method = request_parts[0]
-                url = request_parts[1]
-                protocol = request_parts[2]
-            else:
-                method = request_parts[0] if request_parts else 'GET'
-                url = request_parts[1] if len(request_parts) > 1 else '/'
-                protocol = 'HTTP/1.1'
-            
+            parts = m.group(4).split(' ')
             return {
-                'cdn': match.group(1).lower(),  # [steam], [epic], etc.
-                'ip': match.group(2),
-                'timestamp': match.group(3),
-                'method': method,
-                'url': url,
-                'protocol': protocol,
-                'status': int(match.group(5)),
-                'bytes': int(match.group(6)) if match.group(6).isdigit() else 0,
-                'referrer': match.group(7),
-                'user_agent': match.group(8),
-                'hit_status': match.group(9),  # HIT, MISS, etc.
-                'upstream': match.group(10)
+                'cdn':        m.group(1).lower(),
+                'ip':         m.group(2),
+                'timestamp':  m.group(3),
+                'method':     parts[0] if parts else 'GET',
+                'url':        parts[1] if len(parts) > 1 else '/',
+                'status':     int(m.group(5)),
+                'bytes':      int(m.group(6)) if m.group(6).isdigit() else 0,
+                'referrer':   m.group(7),
+                'user_agent': m.group(8),
+                'hit_status': m.group(9),
+                'upstream':   m.group(10),
             }
-        except (ValueError, IndexError) as e:
-            logger.debug(f"Fehler beim Parsen: {e}")
+        except (ValueError, IndexError):
             return None
 
-    def is_cache_hit(self, request) -> bool:
-        """Bestimmt ob Request ein Cache-Hit war basierend auf hit_status"""
-        if not request:
-            return False
-            
-        hit_status = request.get('hit_status', '').upper()
-        
-        # Direkte Auswertung des hit_status Feldes
-        if hit_status in ['HIT', 'STALE']:
-            return True
-        elif hit_status in ['MISS', 'BYPASS', 'EXPIRED']:
-            return False
-        
-        # Fallback auf HTTP Status
-        status = request.get('status', 0)
-        if status in [200, 206, 304]:
-            return True
-            
-        return False
+    def extract_depot_id(self, r):
+        """Extrahiert Steam Depot-ID aus URL: /depot/123456/chunk/..."""
+        if r.get('cdn', '') != 'steam':
+            return None
+        url = r.get('url', '')
+        m = re.search(r'/depot/(\d+)/', url)
+        if m:
+            return int(m.group(1))
+        return None
 
-    def process_request(self, request):
-        """Verarbeitet einen Request"""
-        if not request:
+    def is_cache_hit(self, r):
+        s = r.get('hit_status', '').upper()
+        if s in ['HIT', 'STALE']:                return True
+        if s in ['MISS', 'BYPASS', 'EXPIRED']:   return False
+        return r.get('status', 0) in [200, 206, 304]
+
+    def process_request(self, r):
+        if not r:
             return
-            
         self.total_requests += 1
-        
-        # Extrahiere Daten
-        cdn = request.get('cdn', 'unknown')
-        method = request.get('method', 'GET')
-        status = str(request.get('status', 0))
-        bytes_served = request.get('bytes', 0)
-        hit_status = request.get('hit_status', 'UNKNOWN')
-        
-        # CDN-Statistiken initialisieren falls nötig
+        cdn, method, status = r.get('cdn', 'unknown'), r.get('method', 'GET'), str(r.get('status', 0))
+        b, hs = r.get('bytes', 0), r.get('hit_status', 'UNKNOWN')
+
         if cdn not in self.cdn_stats:
             self.cdn_stats[cdn] = {'requests': 0, 'hits': 0, 'bytes': 0}
-        
-        # Metriken aktualisieren
+
         self.requests_total.labels(status=status, method=method, cdn=cdn).inc()
-        
-        if bytes_served > 0:
-            self.bytes_total.labels(cdn=cdn, hit_status=hit_status).inc(bytes_served)
-            self.total_bytes_served += bytes_served
-            self.cdn_stats[cdn]['bytes'] += bytes_served
-        
-        # Cache Hit/Miss Tracking
+        if b > 0:
+            self.bytes_total.labels(cdn=cdn, hit_status=hs).inc(b)
+            self.total_bytes_served += b
+            self.cdn_stats[cdn]['bytes'] += b
+
         self.cdn_stats[cdn]['requests'] += 1
-        
-        if self.is_cache_hit(request):
+        hit = self.is_cache_hit(r)
+        if hit:
             self.total_hits += 1
             self.cdn_stats[cdn]['hits'] += 1
             self.cache_hits.labels(cdn=cdn).inc()
         else:
             self.cache_misses.labels(cdn=cdn).inc()
-        
-        # Hit Rate berechnen (global)
+
         if self.total_requests > 0:
-            hit_rate = self.total_hits / self.total_requests
-            self.hit_rate.set(hit_rate)
-        
-        # Hit Rate per CDN berechnen
-        cdn_requests = self.cdn_stats[cdn]['requests']
-        if cdn_requests > 0:
-            cdn_hit_rate = self.cdn_stats[cdn]['hits'] / cdn_requests
-            self.hit_rate_by_cdn.labels(cdn=cdn).set(cdn_hit_rate)
-        
-        # Recent Requests für Aktivitäts-Tracking
-        self.recent_requests.append({
-            'timestamp': datetime.now(),
-            'cdn': cdn,
-            'bytes': bytes_served,
-            'hit_status': hit_status
-        })
+            self.hit_rate.set(self.total_hits / self.total_requests)
+        cr = self.cdn_stats[cdn]['requests']
+        if cr > 0:
+            self.hit_rate_by_cdn.labels(cdn=cdn).set(self.cdn_stats[cdn]['hits'] / cr)
+
+        self.recent_requests.append({'timestamp': datetime.now(), 'cdn': cdn, 'bytes': b, 'hit_status': hs})
+
+        # Depot tracking
+        depot_id = self.extract_depot_id(r)
+        if depot_id:
+            with self.lock:
+                if hit:
+                    self.depot_stats[depot_id]['bytes_hit'] += b
+                    self.depot_stats[depot_id]['hits'] += 1
+                else:
+                    self.depot_stats[depot_id]['bytes_miss'] += b
+                    self.depot_stats[depot_id]['misses'] += 1
+                if depot_id not in self.steam_name_cache:
+                    self.name_resolve_queue.add(depot_id)
+
+    def resolve_names_worker(self):
+        """Löst Spielnamen im Hintergrund auf (ohne den Monitor zu blockieren)"""
+        while True:
+            try:
+                with self.lock:
+                    queue = list(self.name_resolve_queue)[:5]  # max 5 auf einmal
+                for depot_id in queue:
+                    resolve_steam_name(depot_id, self.steam_name_cache)
+                    with self.lock:
+                        self.name_resolve_queue.discard(depot_id)
+                    time.sleep(1)  # Rate-Limiting
+            except Exception as e:
+                logger.error(f"Name-Resolver Fehler: {e}")
+            time.sleep(10)
+
+    def get_depot_top_list(self, limit=20):
+        """Gibt Top-Spiele nach gecachten Bytes zurück"""
+        with self.lock:
+            depots = []
+            for depot_id, stats in self.depot_stats.items():
+                total = stats['bytes_hit'] + stats['bytes_miss']
+                depots.append({
+                    'depot_id':   depot_id,
+                    'name':       self.steam_name_cache.get(str(depot_id), f'Depot {depot_id}'),
+                    'bytes_hit':  stats['bytes_hit'],
+                    'bytes_miss': stats['bytes_miss'],
+                    'bytes_total': total,
+                    'hits':       stats['hits'],
+                    'misses':     stats['misses'],
+                    'hit_rate':   round(stats['hits'] / max(stats['hits'] + stats['misses'], 1) * 100, 1),
+                })
+            depots.sort(key=lambda x: x['bytes_hit'], reverse=True)
+            return depots[:limit]
 
     def monitor_logs(self):
-        """Überwacht Log-Datei kontinuierlich"""
         last_pos = 0
-        
         while True:
             try:
                 if os.path.exists(self.log_path):
                     with open(self.log_path, 'r') as f:
                         f.seek(last_pos)
-                        
                         for line in f:
                             if line.strip():
-                                request = self.parse_lancache_log_line(line)
-                                if request:
-                                    self.process_request(request)
-                        
+                                self.process_request(self.parse_lancache_log_line(line))
                         last_pos = f.tell()
                 else:
                     logger.warning(f"Log-Datei {self.log_path} nicht gefunden")
                     time.sleep(10)
-                    
             except Exception as e:
                 logger.error(f"Fehler beim Lesen der Log-Datei: {e}")
                 time.sleep(5)
-            
-            time.sleep(1)  # Kurze Pause zwischen Checks
+            time.sleep(1)
 
     def update_stats(self):
-        """Aktualisiert periodische Statistiken"""
         while True:
             try:
-                # Uptime aktualisieren
-                uptime = time.time() - self.start_time
-                self.uptime_seconds.set(uptime)
-                
-                # Aktive Verbindungen schätzen (Recent Requests in letzter Minute)
+                self.uptime_seconds.set(time.time() - self.start_time)
                 cutoff = datetime.now()
-                recent_count = sum(1 for r in self.recent_requests 
-                                 if (cutoff - r['timestamp']).seconds < 60)
-                self.active_connections.set(recent_count)
-                
-                # ✅ GEÄNDERT: Explizite Konvertierung für große Zahlen (vermeidet wissenschaftliche Notation)
-                total_bytes = int(self.total_bytes_served)
-                self.cache_size_bytes.set(total_bytes)
-                
-                # ✅ NEU: Dashboard-kompatible Bytes-Metrik setzen
-                self.bytes_served_total.set(total_bytes)
-                
-                # ✅ VERBESSERTES LOGGING: Zeige Bytes in GB
-                gb_served = total_bytes / (1024 * 1024 * 1024)
-                logger.info(f"Stats - Requests: {self.total_requests}, "
-                          f"Hits: {self.total_hits}, "
-                          f"Hit Rate: {(self.total_hits/max(self.total_requests,1))*100:.1f}%, "
-                          f"Bytes Served: {gb_served:.1f} GB, "
-                          f"Recent: {recent_count}")
-                
-                # CDN-Statistiken loggen
-                for cdn, stats in self.cdn_stats.items():
-                    if stats['requests'] > 0:
-                        cdn_hit_rate = (stats['hits'] / stats['requests']) * 100
-                        cdn_gb = stats['bytes'] / (1024 * 1024 * 1024)
-                        logger.info(f"{cdn.upper()}: {stats['requests']} req, "
-                                  f"{stats['hits']} hits ({cdn_hit_rate:.1f}%), "
-                                  f"{cdn_gb:.1f} GB")
-                
+                recent = sum(1 for r in self.recent_requests if (cutoff - r['timestamp']).seconds < 60)
+                self.active_connections.set(recent)
+                tb = int(self.total_bytes_served)
+                self.cache_size_bytes.set(tb)
+                self.bytes_served_total.set(tb)
+                gb = tb / (1024 ** 3)
+                logger.info(
+                    f"Stats - Requests: {self.total_requests}, Hits: {self.total_hits}, "
+                    f"Hit Rate: {(self.total_hits / max(self.total_requests, 1)) * 100:.1f}%, "
+                    f"Bytes: {gb:.1f} GB, Recent: {recent}"
+                )
             except Exception as e:
-                logger.error(f"Fehler beim Aktualisieren der Statistiken: {e}")
-            
-            time.sleep(30)  # Update alle 30 Sekunden
-            
+                logger.error(f"Fehler beim Aktualisieren: {e}")
+            time.sleep(30)
+
     def create_http_handler(self):
-        """Erstellt HTTP Handler für Metriken"""
         registry = self.registry
+        monitor = self
 
         class MetricsHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 if self.path == '/metrics':
-                    output = generate_latest(registry)
+                    out = generate_latest(registry)
                     self.send_response(200)
                     self.send_header('Content-Type', CONTENT_TYPE_LATEST)
-                    self.send_header('Content-Length', str(len(output)))
+                    self.send_header('Content-Length', str(len(out)))
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
-                    self.wfile.write(output)
+                    self.wfile.write(out)
+
+                elif self.path.startswith('/depots'):
+                    limit = 20
+                    if '?limit=' in self.path:
+                        try:
+                            limit = int(self.path.split('?limit=')[1])
+                        except Exception:
+                            pass
+                    data = monitor.get_depot_top_list(limit)
+                    out = json.dumps(data, ensure_ascii=False).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Length', str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+
                 elif self.path == '/health':
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/plain')
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     self.wfile.write(b'OK')
+
                 else:
                     self.send_response(404)
-                    self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
 
-            def log_message(self, format, *args):
-                pass  # Disable HTTP logging
+            def log_message(self, *a):
+                pass
 
         return MetricsHandler
-    
+
     def run(self):
-        """Hauptausführung"""
-        try:
-            # Starte HTTP Server für Metriken
-            handler = self.create_http_handler()
-            httpd = HTTPServer(('0.0.0.0', self.port), handler)
-            
-            # Starte Background Threads
-            log_thread = threading.Thread(target=self.monitor_logs, daemon=True)
-            stats_thread = threading.Thread(target=self.update_stats, daemon=True)
-            
-            log_thread.start()
-            stats_thread.start()
-            
-            logger.info(f"HTTP Server gestartet auf Port {self.port}")
-            logger.info("Monitoring Threads gestartet")
-            logger.info("Warte auf LanCache Log-Daten...")
-            
-            # HTTP Server ausführen
-            httpd.serve_forever()
-            
-        except Exception as e:
-            logger.error(f"Fehler beim Starten: {e}")
-            raise
+        handler = self.create_http_handler()
+        httpd = HTTPServer(('0.0.0.0', self.port), handler)
+        for target in [self.monitor_logs, self.update_stats, self.resolve_names_worker]:
+            threading.Thread(target=target, daemon=True).start()
+        logger.info(f"HTTP Server gestartet auf Port {self.port}")
+        httpd.serve_forever()
+
 
 if __name__ == "__main__":
-    monitor = LanCacheMonitor()
-    monitor.run()
+    LanCacheMonitor().run()

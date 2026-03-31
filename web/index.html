@@ -1,664 +1,194 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LanCache Monitor Dashboard</title>
-    <script src="web_config.js"></script>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LanCache Dashboard</title>
+  <script src="web_config.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+    header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 1.4rem; font-weight: 700; color: #63b3ed; }
+    header span { font-size: 0.85rem; color: #718096; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px; padding: 20px; }
+    .card-label { font-size: 0.75rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .card-value { font-size: 1.8rem; font-weight: 700; color: #63b3ed; }
+    .card-sub { font-size: 0.8rem; color: #718096; margin-top: 4px; }
+    .section { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px; padding: 24px; margin-bottom: 24px; }
+    .section h2 { font-size: 1rem; font-weight: 600; color: #a0aec0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    thead th { text-align: left; padding: 10px 12px; color: #718096; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid #2d3748; }
+    tbody tr { border-bottom: 1px solid #1e2533; transition: background 0.15s; }
+    tbody tr:hover { background: #232b3e; }
+    tbody td { padding: 12px; color: #e2e8f0; }
+    .rank { color: #718096; font-weight: 600; width: 36px; }
+    .rank-1 { color: #f6c90e; }
+    .rank-2 { color: #a8b2c0; }
+    .rank-3 { color: #cd7f32; }
+    .game-name { font-weight: 500; }
+    .depot-id { font-size: 0.75rem; color: #718096; }
+    .bar-wrap { background: #2d3748; border-radius: 4px; height: 6px; min-width: 80px; }
+    .bar-fill { background: #48bb78; border-radius: 4px; height: 6px; transition: width 0.5s; }
+    .hit-rate { font-weight: 600; }
+    .hit-rate.good { color: #48bb78; }
+    .hit-rate.ok   { color: #f6c90e; }
+    .hit-rate.bad  { color: #fc8181; }
+    .btn { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; text-decoration: none; display: inline-block; transition: background 0.2s; }
+    .btn:hover { background: #3d4a5e; }
+    .empty { color: #718096; text-align: center; padding: 40px; font-size: 0.9rem; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #48bb78; display: inline-block; margin-right: 6px; }
+    .status-dot.offline { background: #fc8181; }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🚀 LanCache Monitor Dashboard</h1>
-            <div class="status-indicator" id="statusDot">●</div>
-            <span id="statusText">Verbindung prüfen...</span>
-        </header>
+<header>
+  <div>
+    <h1>🎮 LanCache Dashboard</h1>
+    <span id="last-update">Lade...</span>
+  </div>
+</header>
 
-        <div class="stats-grid">
-            <!-- Gesamt-Statistiken -->
-            <div class="stat-card">
-                <h3>📊 Gesamt-Requests</h3>
-                <div class="stat-value" id="totalRequests">-</div>
-                <div class="stat-label">Total Requests</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>🎯 Cache Hit Rate</h3>
-                <div class="stat-value" id="hitRate">-</div>
-                <div class="stat-label">Global Hit Rate</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>💾 Cache Hits</h3>
-                <div class="stat-value" id="cacheHits">-</div>
-                <div class="stat-label">Total Hits</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>❌ Cache Misses</h3>
-                <div class="stat-value" id="cacheMisses">-</div>
-                <div class="stat-label">Total Misses</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>📦 Bytes Served</h3>
-                <div class="stat-value" id="bytesServed">-</div>
-                <div class="stat-label">Total Bytes</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>🔗 Active Connections</h3>
-                <div class="stat-value" id="activeConnections">-</div>
-                <div class="stat-label">Current Connections</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>⏱️ Uptime</h3>
-                <div class="stat-value" id="uptime">-</div>
-                <div class="stat-label">Monitor Uptime</div>
-            </div>
-
-            <div class="stat-card">
-                <h3>🌐 CDN Count</h3>
-                <div class="stat-value" id="cdnCount">-</div>
-                <div class="stat-label">Active CDNs</div>
-            </div>
-        </div>
-
-        <!-- Bandwidth Savings Section -->
-        <div class="section-separator">💰 BANDWIDTH SAVINGS</div>
-        
-        <div class="stats-grid">
-            <!-- Bandwidth Savings Cards -->
-            <div class="stat-card internet-card">
-                <h3>📥 Internet Downloads</h3>
-                <div class="stat-value" id="internetDownloads">-</div>
-                <div class="stat-label">Cache Downloaded</div>
-                <div class="stat-detail" id="internetDownloadsDetail">From upstream</div>
-            </div>
-
-            <div class="stat-card savings-card">
-                <h3>🔄 Cache Served</h3>
-                <div class="stat-value" id="cacheServed">-</div>
-                <div class="stat-label">Local Cache Hits</div>
-                <div class="stat-detail" id="cacheServedDetail">Served locally</div>
-            </div>
-
-            <div class="stat-card highlight-card">
-                <h3>💰 Bandwidth Saved</h3>
-                <div class="stat-value savings-highlight" id="bandwidthSaved">-</div>
-                <div class="stat-label">Total Savings</div>
-                <div class="stat-detail" id="savingsDetail">Internet traffic avoided</div>
-            </div>
-
-            <div class="stat-card efficiency-card">
-                <h3>📊 Efficiency Rate</h3>
-                <div class="stat-value" id="efficiencyRate">-</div>
-                <div class="stat-label">Bandwidth Efficiency</div>
-                <div class="stat-detail" id="efficiencyDetail">Traffic reduction</div>
-            </div>
-
-            <div class="stat-card ratio-card">
-                <h3>⚖️ Internet vs Cache</h3>
-                <div class="stat-value" id="trafficRatio">-</div>
-                <div class="stat-label">Traffic Ratio</div>
-                <div class="stat-detail" id="ratioDetail">Internet : Cache</div>
-            </div>
-        </div>
-
-        <!-- CDN-spezifische Statistiken -->
-        <div class="section">
-            <h2>📦 CDN-spezifische Statistiken</h2>
-            <div id="cdnStats" class="cdn-grid">
-                <!-- Wird dynamisch gefüllt -->
-            </div>
-        </div>
-
-        <!-- Charts -->
-        <div class="charts-section">
-            <div class="chart-container">
-                <h3>📈 Hit Rate Trend</h3>
-                <canvas id="hitRateChart"></canvas>
-            </div>
-            
-            <div class="chart-container">
-                <h3>🎯 CDN Hit Rates</h3>
-                <canvas id="cdnChart"></canvas>
-            </div>
-        </div>
-
-        <!-- Debug Sektion -->
-        <div class="section">
-            <h2>🔧 Debug Information</h2>
-            <div class="debug-info">
-                <p><strong>Metrics URL:</strong> <span id="metricsUrl">-</span></p>
-                <p><strong>Last Update:</strong> <span id="lastUpdate">-</span></p>
-                <p><strong>Update Interval:</strong> <span id="updateInterval">10s</span></p>
-                <p><strong>Status:</strong> <span id="debugStatus">-</span></p>
-            </div>
-            
-            <button onclick="testConnection()" class="test-button">🧪 Test Connection</button>
-            <button onclick="showRawMetrics()" class="test-button">📄 Show Raw Metrics</button>
-            <button onclick="toggleAutoRefresh()" class="test-button" id="refreshButton">⏸️ Pause Refresh</button>
-        </div>
-
-        <!-- Raw Metrics Modal -->
-        <div id="rawMetricsModal" class="modal">
-            <div class="modal-content">
-                <span class="close" onclick="closeModal()">&times;</span>
-                <h2>📄 Raw Prometheus Metrics</h2>
-                <pre id="rawMetricsContent">Loading...</pre>
-            </div>
-        </div>
+<div class="container">
+  <!-- Stat Cards -->
+  <div class="cards">
+    <div class="card">
+      <div class="card-label">Cache Hit Rate</div>
+      <div class="card-value" id="hit-rate">–</div>
+      <div class="card-sub">Gesamt</div>
     </div>
+    <div class="card">
+      <div class="card-label">Vom Cache geliefert</div>
+      <div class="card-value" id="bytes-hit">–</div>
+      <div class="card-sub">gespart</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Heruntergeladen</div>
+      <div class="card-value" id="bytes-miss">–</div>
+      <div class="card-sub">vom Internet</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Spiele im Cache</div>
+      <div class="card-value" id="game-count">–</div>
+      <div class="card-sub">Steam Depots</div>
+    </div>
+  </div>
 
-    <script>
-        // Globale Variablen
-        let metricsData = {};
-        let updateTimer;
-        let hitRateChart;
-        let cdnChart;
-        let hitRateHistory = [];
-        let autoRefresh = true;
+  <!-- Top Spiele -->
+  <div class="section">
+    <h2>
+      <span class="status-dot" id="status-dot"></span>
+      🏆 Top Spiele vom Cache
+      <span style="margin-left:auto;">
+        <a class="btn" href="#" onclick="loadDepots()">↻ Aktualisieren</a>
+        <a class="btn" id="raw-btn" href="#" target="_blank" style="margin-left:6px;">📊 Raw Metrics</a>
+      </span>
+    </h2>
+    <table id="games-table">
+      <thead>
+        <tr>
+          <th class="rank">#</th>
+          <th>Spiel</th>
+          <th>Vom Cache</th>
+          <th>Heruntergeladen</th>
+          <th>Hit Rate</th>
+          <th>Treffer</th>
+        </tr>
+      </thead>
+      <tbody id="games-body">
+        <tr><td colspan="6" class="empty">Lade Spieldaten...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
 
-        // Chart-Initialisierung
-        function initCharts() {
-            // Hit Rate Trend Chart
-            const hitRateCtx = document.getElementById('hitRateChart').getContext('2d');
-            hitRateChart = new Chart(hitRateCtx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Hit Rate (%)',
-                        data: [],
-                        borderColor: '#4CAF50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        tension: 0.4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100
-                        }
-                    }
-                }
-            });
+<script>
+const METRICS_URL  = (typeof CONFIG !== 'undefined') ? CONFIG.metricsUrl  : 'http://localhost:9114/metrics';
+const MONITOR_BASE = METRICS_URL.replace('/metrics', '');
 
-            // CDN Chart
-            const cdnCtx = document.getElementById('cdnChart').getContext('2d');
-            cdnChart = new Chart(cdnCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: [
-                            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', 
-                            '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
-                        ]
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
-        }
+document.getElementById('raw-btn').href = METRICS_URL;
 
-        // NEUE BANDWIDTH SAVINGS FUNKTIONEN
-        function updateBandwidthMetrics(metrics) {
-            console.log('=== BANDWIDTH METRICS UPDATE ===');
-            
-            // Extrahiere bytes_total Metriken nach hit_status
-            const bytesMetrics = metrics['lancache_bytes_total'] || [];
-            
-            let totalMiss = 0;
-            let totalHit = 0;
-            let totalBypass = 0;
-            
-            bytesMetrics.forEach(metric => {
-                const hitStatus = metric.labels.hit_status;
-                const bytes = metric.value;
-                
-                switch(hitStatus) {
-                    case 'MISS':
-                        totalMiss += bytes;
-                        break;
-                    case 'HIT':
-                        totalHit += bytes;
-                        break;
-                    case 'BYPASS':
-                        totalBypass += bytes;
-                        break;
-                }
-            });
-            
-            console.log('Bytes MISS:', totalMiss);
-            console.log('Bytes HIT:', totalHit);
-            console.log('Bytes BYPASS:', totalBypass);
-            
-            // Berechnungen
-            const totalServed = totalMiss + totalHit + totalBypass;
-            const savingsRatio = totalMiss + totalHit > 0 ? (totalHit / (totalMiss + totalHit)) * 100 : 0;
-            const internetRatio = totalMiss / (1024 * 1024 * 1024); // GB
-            const cacheRatio = totalHit / (1024 * 1024 * 1024); // GB
-            
-            // Update UI
-            document.getElementById('internetDownloads').textContent = formatBytes(totalMiss);
-            document.getElementById('internetDownloadsDetail').textContent = `${formatNumber(totalMiss / (1024 * 1024))} MB downloaded`;
-            
-            document.getElementById('cacheServed').textContent = formatBytes(totalHit);
-            document.getElementById('cacheServedDetail').textContent = `${formatNumber(totalHit / (1024 * 1024))} MB from cache`;
-            
-            document.getElementById('bandwidthSaved').textContent = formatBytes(totalHit);
-            document.getElementById('savingsDetail').textContent = `${savingsRatio.toFixed(1)}% traffic reduction`;
-            
-            document.getElementById('efficiencyRate').textContent = `${savingsRatio.toFixed(1)}%`;
-            document.getElementById('efficiencyDetail').textContent = `${(100 - savingsRatio).toFixed(1)}% internet usage`;
-            
-            // Traffic Ratio
-            const ratio = internetRatio > 0 ? (cacheRatio / internetRatio).toFixed(1) : '∞';
-            document.getElementById('trafficRatio').textContent = `1:${ratio}`;
-            document.getElementById('ratioDetail').textContent = `${internetRatio.toFixed(1)}GB : ${cacheRatio.toFixed(1)}GB`;
-            
-            console.log('=== BANDWIDTH METRICS COMPLETE ===');
-        }
+function fmtBytes(b) {
+  if (b === 0) return '0 B';
+  const units = ['B','KB','MB','GB','TB'];
+  let i = 0;
+  while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i > 1 ? 2 : 0) + ' ' + units[i];
+}
 
-        // Metriken abrufen und parsen
-        async function fetchMetrics() {
-            const metricsUrl = document.getElementById('metricsUrl').textContent || CONFIG.metricsUrl;
-            
-            try {
-                let response;
-                
-                // Versuche zunächst relativen Pfad (Proxy)
-                try {
-                    response = await fetch(CONFIG.metricsUrl);
-                    if (!response.ok) throw new Error('Proxy failed');
-                } catch (proxyError) {
-                    // Fallback auf direkte URL
-                    response = await fetch(CONFIG.fallbackUrl);
-                }
+function rankClass(i) {
+  return i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : '';
+}
 
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
+function hitClass(rate) {
+  return rate >= 80 ? 'good' : rate >= 50 ? 'ok' : 'bad';
+}
 
-                const text = await response.text();
-                document.getElementById('debugStatus').textContent = `✅ OK (${response.status})`;
-                document.getElementById('metricsUrl').textContent = response.url;
-                
-                return parsePrometheusMetrics(text);
-                
-            } catch (error) {
-                console.error('Fehler beim Abrufen der Metriken:', error);
-                document.getElementById('debugStatus').textContent = `❌ Error: ${error.message}`;
-                throw error;
-            }
-        }
+async function loadDepots() {
+  const url = MONITOR_BASE + '/depots?limit=25';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
 
-        // Prometheus-Metriken parsen
-        function parsePrometheusMetrics(text) {
-            const metrics = {};
-            const lines = text.split('\n');
+    const dot = document.getElementById('status-dot');
+    dot.className = 'status-dot';
 
-            lines.forEach(line => {
-                // Überspringe Kommentare und leere Zeilen
-                if (line.startsWith('#') || !line.trim()) return;
+    if (!data.length) {
+      document.getElementById('games-body').innerHTML = '<tr><td colspan="6" class="empty">Noch keine Steam-Daten im Cache vorhanden.</td></tr>';
+      return;
+    }
 
-                // Parse Metrik-Zeile: metric_name{labels} value
-                const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*?\})?\s+([\d\.\-]+(?:e[\+\-]?\d+)?)$/i);
-                if (!match) return;
+    // Summary-Karten füllen
+    const totalHit  = data.reduce((s, d) => s + d.bytes_hit,  0);
+    const totalMiss = data.reduce((s, d) => s + d.bytes_miss, 0);
+    const total     = totalHit + totalMiss;
+    document.getElementById('hit-rate').textContent    = total > 0 ? (totalHit / total * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('bytes-hit').textContent   = fmtBytes(totalHit);
+    document.getElementById('bytes-miss').textContent  = fmtBytes(totalMiss);
+    document.getElementById('game-count').textContent  = data.length;
 
-                const [, name, labelsStr, value] = match;
-                const labels = parseLabels(labelsStr || '');
+    const maxBytes = data[0].bytes_hit || 1;
 
-                if (!metrics[name]) metrics[name] = [];
-                metrics[name].push({
-                    labels,
-                    value: parseFloat(value)
-                });
-            });
+    const rows = data.map((g, i) => {
+      const barW = Math.round(g.bytes_hit / maxBytes * 100);
+      return `<tr>
+        <td class="rank ${rankClass(i)}">${i + 1}</td>
+        <td>
+          <div class="game-name">${escHtml(g.name)}</div>
+          <div class="depot-id">Depot ${g.depot_id}</div>
+        </td>
+        <td>${fmtBytes(g.bytes_hit)}</td>
+        <td>${fmtBytes(g.bytes_miss)}</td>
+        <td>
+          <span class="hit-rate ${hitClass(g.hit_rate)}">${g.hit_rate}%</span>
+          <div class="bar-wrap" style="margin-top:4px;">
+            <div class="bar-fill" style="width:${g.hit_rate}%"></div>
+          </div>
+        </td>
+        <td>${g.hits} / ${g.hits + g.misses}</td>
+      </tr>`;
+    }).join('');
 
-            return metrics;
-        }
+    document.getElementById('games-body').innerHTML = rows;
+    document.getElementById('last-update').textContent = 'Zuletzt: ' + new Date().toLocaleTimeString('de-DE');
 
-        function parsePrometheusValue(valueStr) {
-            const cleanValue = String(valueStr).replace(/['"]/g, '').trim();
-    
-            if (cleanValue.includes('e') || cleanValue.length > 10) {
-                console.log('Parsing large/scientific number:', cleanValue);
-            }
-    
-            const parsed = parseFloat(cleanValue);
-            return isNaN(parsed) ? 0 : parsed;
-        }
+  } catch (e) {
+    const dot = document.getElementById('status-dot');
+    dot.className = 'status-dot offline';
+    document.getElementById('games-body').innerHTML = `<tr><td colspan="6" class="empty">Monitor nicht erreichbar: ${e.message}<br><small>${url}</small></td></tr>`;
+  }
+}
 
-        function parseMetrics(metricsText) {
-            // Suche nach neuer bytes_served_total Metrik
-            const bytesMatch = metricsText.match(/lancache_bytes_served_total\s+([\d\.e\+\-]+)/i);
-    
-            if (bytesMatch) {
-                const bytesValue = parsePrometheusValue(bytesMatch[1]);
-                document.getElementById('totalBytes').textContent = formatBytes(bytesValue);
-            }
-        }
-    
-        // Labels parsen
-        function parseLabels(labelsStr) {
-            const labels = {};
-            if (!labelsStr) return labels;
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-            const cleanStr = labelsStr.slice(1, -1); // Entferne { }
-            const pairs = cleanStr.match(/\w+="[^"]*"/g) || [];
-
-            pairs.forEach(pair => {
-                const [key, value] = pair.split('=');
-                labels[key] = value.slice(1, -1); // Entferne Anführungszeichen
-            });
-
-            return labels;
-        }
-
-        // UI aktualisieren (ERWEITERT)
-        function updateUI(metrics) {
-            metricsData = metrics;
-
-            // Bestehende Updates
-            updateTotalRequests(metrics);
-            updateHitRate(metrics);
-            updateCacheStats(metrics);
-            updateBytesServed(metrics);
-            updateActiveConnections(metrics);
-            updateUptime(metrics);
-            updateCDNStats(metrics);
-            
-            // ✅ NEU: Bandwidth Savings
-            updateBandwidthMetrics(metrics);
-
-            // Charts aktualisieren
-            updateCharts(metrics);
-
-            // Status
-            document.getElementById('statusDot').className = 'status-indicator online';
-            document.getElementById('statusText').textContent = 'Online';
-            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-        }
-
-        function updateTotalRequests(metrics) {
-            const requests = metrics['lancache_requests_total'] || [];
-            const total = requests.reduce((sum, metric) => sum + metric.value, 0);
-            document.getElementById('totalRequests').textContent = formatNumber(total);
-        }
-
-        function updateHitRate(metrics) {
-            const hitRate = metrics['lancache_hit_rate'];
-            if (hitRate && hitRate.length > 0) {
-                const rate = (hitRate[0].value * 100).toFixed(1);
-                document.getElementById('hitRate').textContent = `${rate}%`;
-                
-                // Hit Rate History für Chart
-                const now = new Date().toLocaleTimeString();
-                hitRateHistory.push({ time: now, rate: parseFloat(rate) });
-                if (hitRateHistory.length > CONFIG.maxDataPoints) {
-                    hitRateHistory.shift();
-                }
-            } else {
-                // Fallback: Berechne aus Hits/Misses
-                const hits = metrics['lancache_cache_hits_total'] || [];
-                const misses = metrics['lancache_cache_misses_total'] || [];
-                
-                const totalHits = hits.reduce((sum, metric) => sum + metric.value, 0);
-                const totalMisses = misses.reduce((sum, metric) => sum + metric.value, 0);
-                const totalRequests = totalHits + totalMisses;
-                
-                if (totalRequests > 0) {
-                    const rate = ((totalHits / totalRequests) * 100).toFixed(1);
-                    document.getElementById('hitRate').textContent = `${rate}%`;
-                } else {
-                    document.getElementById('hitRate').textContent = '0%';
-                }
-            }
-        }
-
-        function updateCacheStats(metrics) {
-            const hits = metrics['lancache_cache_hits_total'] || [];
-            const misses = metrics['lancache_cache_misses_total'] || [];
-
-            const totalHits = hits.reduce((sum, metric) => sum + metric.value, 0);
-            const totalMisses = misses.reduce((sum, metric) => sum + metric.value, 0);
-
-            document.getElementById('cacheHits').textContent = formatNumber(totalHits);
-            document.getElementById('cacheMisses').textContent = formatNumber(totalMisses);
-        }
-
-        function updateBytesServed(metrics) {
-            console.log('=== BYTES SERVED DEBUG ===');
-    
-            let totalBytes = 0;
-            if (metrics['lancache_bytes_served_total']?.length > 0) {
-                totalBytes = metrics['lancache_bytes_served_total'][0].value;
-                console.log('Found bytes_served_total:', totalBytes);
-            }
-    
-            document.getElementById('bytesServed').textContent = formatBytes(totalBytes);
-        }
-
-        function updateActiveConnections(metrics) {
-            const connections = metrics['lancache_active_connections'];
-            if (connections && connections.length > 0) {
-                document.getElementById('activeConnections').textContent = formatNumber(connections[0].value);
-            } else {
-                document.getElementById('activeConnections').textContent = '0';
-            }
-        }
-
-        function updateUptime(metrics) {
-            const uptime = metrics['lancache_uptime_seconds'];
-            if (uptime && uptime.length > 0) {
-                document.getElementById('uptime').textContent = formatDuration(uptime[0].value);
-            } else {
-                document.getElementById('uptime').textContent = '-';
-            }
-        }
-
-        function updateCDNStats(metrics) {
-            const cdnContainer = document.getElementById('cdnStats');
-            const cdnData = new Map();
-
-            // Sammle CDN-Daten
-            ['lancache_cache_hits_total', 'lancache_cache_misses_total', 'lancache_hit_rate_by_cdn'].forEach(metricName => {
-                const metricList = metrics[metricName] || [];
-                metricList.forEach(metric => {
-                    const cdn = metric.labels.cdn;
-                    if (!cdn) return;
-
-                    if (!cdnData.has(cdn)) {
-                        cdnData.set(cdn, { hits: 0, misses: 0, hitRate: 0 });
-                    }
-
-                    const data = cdnData.get(cdn);
-                    if (metricName === 'lancache_cache_hits_total') {
-                        data.hits = metric.value;
-                    } else if (metricName === 'lancache_cache_misses_total') {
-                        data.misses = metric.value;
-                    } else if (metricName === 'lancache_hit_rate_by_cdn') {
-                        data.hitRate = metric.value * 100;
-                    }
-                });
-            });
-
-            // Update CDN Count
-            document.getElementById('cdnCount').textContent = cdnData.size;
-
-            // Erstelle CDN-Cards
-            cdnContainer.innerHTML = '';
-            cdnData.forEach((data, cdn) => {
-                const cdnCard = document.createElement('div');
-                cdnCard.className = 'cdn-card';
-                cdnCard.innerHTML = `
-                    <h4>📦 ${cdn.toUpperCase()}</h4>
-                    <div class="cdn-stats">
-                        <div class="cdn-stat">
-                            <span class="label">Hits:</span>
-                            <span class="value">${formatNumber(data.hits)}</span>
-                        </div>
-                        <div class="cdn-stat">
-                            <span class="label">Misses:</span>
-                            <span class="value">${formatNumber(data.misses)}</span>
-                        </div>
-                        <div class="cdn-stat">
-                            <span class="label">Hit Rate:</span>
-                            <span class="value">${data.hitRate.toFixed(1)}%</span>
-                        </div>
-                    </div>
-                `;
-                cdnContainer.appendChild(cdnCard);
-            });
-        }
-
-        function updateCharts(metrics) {
-            // Hit Rate Chart
-            if (hitRateHistory.length > 0) {
-                hitRateChart.data.labels = hitRateHistory.map(h => h.time);
-                hitRateChart.data.datasets[0].data = hitRateHistory.map(h => h.rate);
-                hitRateChart.update('none');
-            }
-
-            // CDN Chart
-            const cdnHits = metrics['lancache_cache_hits_total'] || [];
-            const cdnLabels = [];
-            const cdnValues = [];
-
-            cdnHits.forEach(metric => {
-                if (metric.labels.cdn) {
-                    cdnLabels.push(metric.labels.cdn.toUpperCase());
-                    cdnValues.push(metric.value);
-                }
-            });
-
-            if (cdnLabels.length > 0) {
-                cdnChart.data.labels = cdnLabels;
-                cdnChart.data.datasets[0].data = cdnValues;
-                cdnChart.update('none');
-            }
-        }
-
-        // Hilfsfunktionen
-        function formatNumber(num) {
-            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-            return Math.round(num).toString();
-        }
-
-        function formatBytes(bytes) {
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            if (bytes === 0) return '0 B';
-            const i = Math.floor(Math.log(bytes) / Math.log(1024));
-            return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
-        }
-
-        function formatDuration(seconds) {
-            const days = Math.floor(seconds / 86400);
-            const hours = Math.floor((seconds % 86400) / 3600);
-            const mins = Math.floor((seconds % 3600) / 60);
-            const secs = Math.floor(seconds % 60);
-
-            if (days > 0) return `${days}d ${hours}h`;
-            if (hours > 0) return `${hours}h ${mins}m`;
-            if (mins > 0) return `${mins}m ${secs}s`;
-            return `${secs}s`;
-        }
-
-        // Event Handler
-        async function testConnection() {
-            document.getElementById('debugStatus').textContent = '🔄 Testing...';
-            try {
-                await fetchMetrics();
-                alert('✅ Verbindung erfolgreich!');
-            } catch (error) {
-                alert(`❌ Verbindungsfehler: ${error.message}`);
-            }
-        }
-
-        async function showRawMetrics() {
-            const modal = document.getElementById('rawMetricsModal');
-            const content = document.getElementById('rawMetricsContent');
-            
-            modal.style.display = 'block';
-            content.textContent = 'Loading...';
-            
-            try {
-                const response = await fetch(CONFIG.fallbackUrl);
-                const text = await response.text();
-                content.textContent = text;
-            } catch (error) {
-                content.textContent = `Error: ${error.message}`;
-            }
-        }
-
-        function closeModal() {
-            document.getElementById('rawMetricsModal').style.display = 'none';
-        }
-
-        function toggleAutoRefresh() {
-            autoRefresh = !autoRefresh;
-            const button = document.getElementById('refreshButton');
-            
-            if (autoRefresh) {
-                button.textContent = '⏸️ Pause Refresh';
-                startUpdates();
-            } else {
-                button.textContent = '▶️ Resume Refresh';
-                if (updateTimer) {
-                    clearInterval(updateTimer);
-                }
-            }
-        }
-
-        // Main Update Loop
-        async function updateData() {
-            if (!autoRefresh) return;
-            
-            try {
-                const metrics = await fetchMetrics();
-                updateUI(metrics);
-            } catch (error) {
-                console.error('Update failed:', error);
-                document.getElementById('statusDot').className = 'status-indicator offline';
-                document.getElementById('statusText').textContent = 'Offline';
-                document.getElementById('debugStatus').textContent = `❌ ${error.message}`;
-            }
-        }
-
-        function startUpdates() {
-            updateData(); // Sofortiger erster Update
-            updateTimer = setInterval(updateData, CONFIG.updateInterval);
-        }
-
-        // Initialisierung
-        document.addEventListener('DOMContentLoaded', function() {
-            initCharts();
-            startUpdates();
-            
-            // Modal-Handler
-            window.onclick = function(event) {
-                const modal = document.getElementById('rawMetricsModal');
-                if (event.target === modal) {
-                    closeModal();
-                }
-            };
-        });
-    </script>
+// Init
+loadDepots();
+setInterval(loadDepots, 30000);
+</script>
 </body>
 </html>
