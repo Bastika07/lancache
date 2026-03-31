@@ -1,80 +1,83 @@
+# LanCache Full-Stack – verwendet fertige Images von GHCR.
+# Kein 'docker compose build' erforderlich.
+
 x-restart-policy: &restart-policy "unless-stopped"
 
 services:
-  # === ORIGINAL LANCACHE SERVICES ===
+
   dns:
     image: lancachenet/lancache-dns:latest
     env_file: .env
     restart: *restart-policy
     ports:
-      - ${DNS_BIND_IP}:53:53/udp
-      - ${DNS_BIND_IP}:53:53/tcp
+      - "${DNS_BIND_IP}:53:53/udp"
+      - "${DNS_BIND_IP}:53:53/tcp"
 
   monolithic:
     image: lancachenet/monolithic:latest
     env_file: .env
     restart: *restart-policy
     ports:
-      - ${LANCACHE_IP}:80:80/tcp
-      - ${LANCACHE_IP}:443:443/tcp
+      - "${LANCACHE_IP}:80:80/tcp"
+      - "${LANCACHE_IP}:443:443/tcp"
     volumes:
       - ${CACHE_ROOT}/cache:/data/cache
       - ${CACHE_ROOT}/logs:/data/logs
 
-  # === MONITORING SERVICES ===
   log-monitor:
-    build:
-      context: .
-      dockerfile: Dockerfile.monitor
+    image: ghcr.io/bastika07/lancache-monitor:latest
     env_file: .env
     restart: *restart-policy
+    depends_on:
+      - monolithic
     volumes:
       - ${CACHE_ROOT}/logs:/data/logs:ro
     ports:
-      - "9114:9114"
+      - "127.0.0.1:9114:9114"
     environment:
       - LOG_PATH=/data/logs/access.log
       - PROMETHEUS_PORT=9114
 
-  # Prometheus mit korrigierten Command-Line Argumenten
   prometheus:
-    image: prom/prometheus:latest
+    image: ghcr.io/bastika07/lancache-prometheus:latest
     restart: *restart-policy
+    depends_on:
+      - log-monitor
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
-      - ./monitoring/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
       - '--storage.tsdb.retention.size=10GB'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
 
   grafana:
-    image: grafana/grafana:latest
+    image: ghcr.io/bastika07/lancache-grafana:latest
     restart: *restart-policy
+    depends_on:
+      - prometheus
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-changeme}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     user: "472"
 
   web-stats:
-    image: nginx:alpine
+    image: ghcr.io/bastika07/lancache-web:latest
     restart: *restart-policy
+    depends_on:
+      - log-monitor
     ports:
       - "8080:80"
-    volumes:
-      - ./monitoring/web:/usr/share/nginx/html:ro
+    environment:
+      - LANCACHE_IP=${LANCACHE_IP}
+      - PROMETHEUS_PORT=9114
 
 volumes:
   prometheus-data:
