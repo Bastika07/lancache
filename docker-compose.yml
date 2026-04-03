@@ -1,5 +1,8 @@
-# LanCache Full-Stack – verwendet fertige Images von GHCR.
-# Kein 'docker compose build' erforderlich.
+# LanCache Slim-Stack – ohne Prometheus & Grafana
+# Benoetigt nur 4 Container, ideal fuer Synology / Low-RAM-Systeme.
+# Web-Dashboard: http://LANCACHE_IP:8080
+# Metriken:      http://LANCACHE_IP:9114/metrics
+# Spiele-JSON:   http://LANCACHE_IP:9114/depots
 
 x-restart-policy: &restart-policy "unless-stopped"
 
@@ -33,40 +36,16 @@ services:
     volumes:
       - ${CACHE_ROOT}/logs:/data/logs:ro
     ports:
-      - "127.0.0.1:9114:9114"
+      - "9114:9114"
     environment:
       - LOG_PATH=/data/logs/access.log
       - PROMETHEUS_PORT=9114
-
-  prometheus:
-    image: ghcr.io/bastika07/lancache-prometheus:latest
-    restart: *restart-policy
-    depends_on:
-      - log-monitor
-    ports:
-      - "127.0.0.1:9090:9090"
-    volumes:
-      - prometheus-data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-      - '--storage.tsdb.retention.size=10GB'
-      - '--web.enable-lifecycle'
-
-  grafana:
-    image: ghcr.io/bastika07/lancache-grafana:latest
-    restart: *restart-policy
-    depends_on:
-      - prometheus
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-changeme}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana-data:/var/lib/grafana
-    user: "472"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9114/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   web-stats:
     image: ghcr.io/bastika07/lancache-web:latest
@@ -78,12 +57,6 @@ services:
     environment:
       - LANCACHE_IP=${LANCACHE_IP}
       - PROMETHEUS_PORT=9114
-
-volumes:
-  prometheus-data:
-    driver: local
-  grafana-data:
-    driver: local
 
 networks:
   default:
