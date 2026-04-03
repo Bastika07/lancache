@@ -10,10 +10,15 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STEAM_CACHE_FILE   = "/tmp/steam_names.json"
-STEAM_APPLIST_FILE = "/tmp/steam_applist.json"
-STEAM_APPLIST_TTL  = 86400        # AppList alle 24h neu laden
-RETRY_UNKNOWN_TTL  = 86400        # "Depot XXXXX"-Eintraege nach 24h nochmal versuchen
+# ── Persistente Cache-Pfade ───────────────────────────────────────────────────
+# /data/cache wird als Volume gemountet → bleibt nach Container-Neustart erhalten
+CACHE_DIR          = os.getenv("CACHE_DIR", "/data/cache")
+STEAM_CACHE_FILE   = os.path.join(CACHE_DIR, "steam_names.json")
+STEAM_APPLIST_FILE = os.path.join(CACHE_DIR, "steam_applist.json")
+STEAM_APPLIST_TTL  = 86400   # AppList alle 24h neu laden
+RETRY_UNKNOWN_TTL  = 86400   # "Depot XXXXX"-Eintraege nach 24h nochmal versuchen
+
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ── Blizzard Game-Code → Name ─────────────────────────────────────────────────
 BLIZZARD_GAMES = {
@@ -40,7 +45,7 @@ BLIZZARD_GAMES = {
 }
 
 
-# ── Steam Name-Cache (disk) ───────────────────────────────────────────────────
+# ── Steam Name-Cache (Disk) ───────────────────────────────────────────────────
 def load_steam_cache():
     try:
         with open(STEAM_CACHE_FILE) as f:
@@ -57,8 +62,7 @@ def save_steam_cache(cache):
         pass
 
 
-# ── Steam AppList (RAM-Cache) ─────────────────────────────────────────────────
-# Globales dict: str(app_id) -> name  (sehr schneller O(1)-Lookup)
+# ── Steam AppList (RAM-Cache + Disk) ─────────────────────────────────────────
 _applist: dict = {}
 _applist_lock   = threading.Lock()
 
@@ -69,24 +73,21 @@ def get_applist() -> dict:
 
 
 def load_applist_from_disk():
-    """Laedt gecachte AppList vom Disk. Gibt {} zurueck wenn abgelaufen."""
     try:
         with open(STEAM_APPLIST_FILE) as f:
             data = json.load(f)
         if time.time() - data.get("_fetched", 0) < STEAM_APPLIST_TTL:
             apps = data.get("apps", {})
-            logger.info(f"AppList vom Disk geladen: {len(apps)} Apps")
+            logger.info(f"AppList vom Disk geladen: {len(apps)} Apps ({STEAM_APPLIST_FILE})")
             return apps
+        else:
+            logger.info("AppList auf Disk abgelaufen, hole neue...")
     except Exception:
         pass
     return {}
 
 
 def fetch_applist_from_api():
-    """
-    Laedt AppList von IStoreService/GetAppList/v1 (benoetigt STEAM_API_KEY).
-    Ohne Key: gibt {} zurueck.
-    """
     api_key = os.getenv("STEAM_API_KEY", "").strip()
     if not api_key:
         logger.info("Kein STEAM_API_KEY gesetzt – AppList-Fetch uebersprungen")
@@ -111,15 +112,14 @@ def fetch_applist_from_api():
             for a in apps_raw:
                 if a.get("name"):
                     apps[str(a["appid"])] = a["name"]
-            logger.info(f"AppList Seite {page}: {len(apps_raw)} Eintraege (+{len(apps)} gesamt)")
+            logger.info(f"AppList Seite {page}: {len(apps_raw)} Eintraege ({len(apps)} gesamt)")
             if resp.get("have_more_results") and apps_raw:
                 last_appid = apps_raw[-1]["appid"]
             else:
                 break
-        # Auf Disk speichern
         with open(STEAM_APPLIST_FILE, "w") as f:
             json.dump({"_fetched": time.time(), "apps": apps}, f)
-        logger.info(f"Steam AppList gecacht: {len(apps)} Apps gesamt")
+        logger.info(f"Steam AppList gespeichert: {len(apps)} Apps → {STEAM_APPLIST_FILE}")
         return apps
     except Exception as e:
         logger.warning(f"AppList-Abruf fehlgeschlagen: {e}")
@@ -127,19 +127,15 @@ def fetch_applist_from_api():
 
 
 def applist_refresh_worker():
-    """Background-Thread: AppList beim Start laden + taeglich erneuern."""
     global _applist
-    # Zuerst Disk-Cache versuchen (sofort verfuegbar)
     cached = load_applist_from_disk()
     with _applist_lock:
         _applist = cached
-    # Wenn Disk-Cache leer/abgelaufen → API holen
     if not cached:
         fresh = fetch_applist_from_api()
         if fresh:
             with _applist_lock:
                 _applist = fresh
-    # Danach taeglich erneuern
     while True:
         time.sleep(STEAM_APPLIST_TTL)
         fresh = fetch_applist_from_api()
@@ -150,31 +146,15 @@ def applist_refresh_worker():
 
 # ── Steam Depot → App-Name Resolver ──────────────────────────────────────────
 def resolve_steam_app(depot_id, cache):
-    """
-    Loest einen Steam Depot auf einen App-Namen auf.
-
-    Reihenfolge:
-      1. Disk-Cache  (sofort, kein Netz)
-         - Bei bekannten "Depot XXXXX"-Eintraegen: nach RETRY_UNKNOWN_TTL nochmal versuchen
-      2. AppList     (RAM-Lookup, O(1), kein Netz)
-      3. appdetails  (Steam-API, langsam, Fallback)
-
-    Cache-Eintrag-Format:
-      {"app_id": int, "name": str, "source": "applist|appdetails|unknown",
-       "_fetched": float, "_retry_after": float (nur bei source=unknown)}
-    """
     key = f"depot_{depot_id}"
     now = time.time()
 
-    # 1a. Cache-Hit: bekannter Name → sofort zurueck
+    # 1. Cache-Hit prüfen (Disk-Cache, bereits beim Start geladen)
     if key in cache:
         entry = cache[key]
-        # Retry-Logik: war unbekannt + TTL abgelaufen → nochmal suchen
         if entry.get("source") == "unknown":
-            retry_after = entry.get("_retry_after", 0)
-            if now < retry_after:
+            if now < entry.get("_retry_after", 0):
                 return entry.get("app_id", depot_id), entry.get("name", f"Depot {depot_id}")
-            # TTL abgelaufen → Cache-Eintrag entfernen und neu suchen
             logger.info(f"Depot {depot_id}: Retry nach {RETRY_UNKNOWN_TTL/3600:.0f}h")
             del cache[key]
         else:
@@ -182,7 +162,7 @@ def resolve_steam_app(depot_id, cache):
 
     candidates = [depot_id] + list(range(depot_id - 1, depot_id - 11, -1))
 
-    # 2. AppList-Lookup (O(1) pro Kandidat, kein API-Call!)
+    # 2. AppList-Lookup (O(1), kein API-Call)
     applist = get_applist()
     if applist:
         for app_id in candidates:
@@ -190,15 +170,12 @@ def resolve_steam_app(depot_id, cache):
                 continue
             name = applist.get(str(app_id))
             if name:
-                cache[key] = {
-                    "app_id": app_id, "name": name,
-                    "source": "applist", "_fetched": now,
-                }
+                cache[key] = {"app_id": app_id, "name": name, "source": "applist", "_fetched": now}
                 save_steam_cache(cache)
                 logger.info(f"Steam Depot {depot_id} → App {app_id}: {name} [AppList]")
                 return app_id, name
 
-    # 3. Fallback: appdetails-API (langsam, aber vollstaendiger)
+    # 3. Fallback: appdetails-API
     for app_id in candidates:
         if app_id <= 0:
             continue
@@ -210,10 +187,7 @@ def resolve_steam_app(depot_id, cache):
             if info.get("success") and info.get("data", {}).get("name"):
                 name = info["data"]["name"]
                 if info["data"].get("type", "game") in ("game", "dlc", "application", "demo"):
-                    cache[key] = {
-                        "app_id": app_id, "name": name,
-                        "source": "appdetails", "_fetched": now,
-                    }
+                    cache[key] = {"app_id": app_id, "name": name, "source": "appdetails", "_fetched": now}
                     save_steam_cache(cache)
                     logger.info(f"Steam Depot {depot_id} → App {app_id}: {name} [appdetails]")
                     return app_id, name
@@ -221,7 +195,7 @@ def resolve_steam_app(depot_id, cache):
             pass
         time.sleep(0.3)
 
-    # Nicht gefunden → als "unknown" cachen, nach RETRY_UNKNOWN_TTL nochmal
+    # Nicht gefunden → Retry in 24h
     cache[key] = {
         "app_id": depot_id, "name": f"Depot {depot_id}",
         "source": "unknown", "_fetched": now,
@@ -296,6 +270,9 @@ class LanCacheMonitor:
 
         logger.info(f"LanCache Monitor gestartet auf Port {self.port}")
         logger.info(f"Ueberwache Log: {self.log_path}")
+        logger.info(f"Cache-Verzeichnis: {CACHE_DIR}")
+        logger.info(f"  steam_names.json : {STEAM_CACHE_FILE}")
+        logger.info(f"  steam_applist.json: {STEAM_APPLIST_FILE}")
 
     # ── Log-Parsing ───────────────────────────────────────────────────────────
 
@@ -377,7 +354,6 @@ class LanCacheMonitor:
                 if cdn_key == "steam":
                     cache_key = f"depot_{game_id}"
                     entry = self.steam_cache.get(cache_key, {})
-                    # In Queue wenn: noch nie gesehen ODER unknown-Retry faellig
                     if cache_key not in self.steam_cache or (
                         entry.get("source") == "unknown" and
                         time.time() >= entry.get("_retry_after", 0)
@@ -387,7 +363,6 @@ class LanCacheMonitor:
     # ── Name-Aufloesung ───────────────────────────────────────────────────────
 
     def resolve_name(self, cdn, game_id):
-        """Gibt (app_id, name, source) zurueck."""
         if cdn == "steam":
             key   = f"depot_{game_id}"
             entry = self.steam_cache.get(key, {})
@@ -396,45 +371,31 @@ class LanCacheMonitor:
                 entry.get("name", f"Depot {game_id}"),
                 entry.get("source", "unknown"),
             )
-
         elif cdn == "blizzard":
             name = BLIZZARD_GAMES.get(str(game_id), f"Blizzard: {game_id}")
-            src  = "builtin" if str(game_id) in BLIZZARD_GAMES else "unknown"
-            return game_id, name, src
-
+            return game_id, name, "builtin" if str(game_id) in BLIZZARD_GAMES else "unknown"
         elif cdn == "epicgames":
             short = str(game_id)[:14] if len(str(game_id)) > 14 else str(game_id)
             key   = f"epic_{game_id}"
             entry = self.steam_cache.get(key, {})
             return game_id, entry.get("name", f"Epic: {short}"), entry.get("source", "unknown")
-
         elif cdn == "wsus":
             if game_id == "__wsus__":
                 return game_id, "Windows Update", "builtin"
-            short = str(game_id)[:8]
-            return game_id, f"Windows Update ({short}...)", "builtin"
-
+            return game_id, f"Windows Update ({str(game_id)[:8]}...)", "builtin"
         return game_id, str(game_id), "unknown"
 
     def resolve_names_worker(self):
-        """
-        Verarbeitet die name_resolve_queue.
-        - AppList-Lookup ist O(1) → Batch-Groesse 20
-        - appdetails-Fallback ist langsam → weiterhin 5 pro Runde wenn kein AppList
-        """
         while True:
             try:
                 applist_available = len(get_applist()) > 0
                 batch_size = 20 if applist_available else 5
-
                 with self.lock:
                     queue = list(self.name_resolve_queue)[:batch_size]
-
                 for depot_id in queue:
                     resolve_steam_app(depot_id, self.steam_cache)
                     with self.lock:
                         self.name_resolve_queue.discard(depot_id)
-                    # AppList: kein Delay noetig; appdetails: kurze Pause
                     if not applist_available:
                         time.sleep(1)
             except Exception as e:
@@ -487,8 +448,7 @@ class LanCacheMonitor:
         with self.lock:
             steam_groups = {}
             wsus_total   = {"cdn": "wsus", "app_id": "__wsus_total__", "name": "Windows Update (gesamt)",
-                            "depots": [], "bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0,
-                            "source": "builtin"}
+                            "source": "builtin", "depots": [], "bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0}
             wsus_files   = []
             other_games  = []
 
@@ -500,8 +460,7 @@ class LanCacheMonitor:
                     app_id, name, source = self.resolve_name(cdn, game_id)
                     if app_id not in steam_groups:
                         steam_groups[app_id] = {
-                            "cdn": "steam", "app_id": app_id, "name": name,
-                            "source": source,
+                            "cdn": "steam", "app_id": app_id, "name": name, "source": source,
                             "depots": [], "bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0,
                         }
                     steam_groups[app_id]["depots"].append(game_id)
@@ -518,8 +477,7 @@ class LanCacheMonitor:
                     if game_id != "__wsus__":
                         _, name, source = self.resolve_name(cdn, game_id)
                         wsus_files.append({
-                            "cdn": "wsus", "app_id": game_id, "name": name,
-                            "source": source,
+                            "cdn": "wsus", "app_id": game_id, "name": name, "source": source,
                             "depots": [], "bytes_hit": stats["bytes_hit"],
                             "bytes_miss": stats["bytes_miss"],
                             "hits": stats["hits"], "misses": stats["misses"],
@@ -527,8 +485,7 @@ class LanCacheMonitor:
                 else:
                     _, name, source = self.resolve_name(cdn, game_id)
                     other_games.append({
-                        "cdn": cdn, "app_id": str(game_id), "name": name,
-                        "source": source,
+                        "cdn": cdn, "app_id": str(game_id), "name": name, "source": source,
                         "depots": [], "bytes_hit": stats["bytes_hit"],
                         "bytes_miss": stats["bytes_miss"],
                         "hits": stats["hits"], "misses": stats["misses"],
