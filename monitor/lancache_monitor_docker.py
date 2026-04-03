@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 CACHE_DIR          = os.getenv("CACHE_DIR", "/data/cache")
 STEAM_CACHE_FILE   = os.path.join(CACHE_DIR, "steam_names.json")
 STEAM_APPLIST_FILE = os.path.join(CACHE_DIR, "steam_applist.json")
-STEAM_APPLIST_TTL  = 86400   # AppList alle 24h neu laden
-RETRY_UNKNOWN_TTL  = 86400   # "Depot XXXXX"-Eintraege nach 24h nochmal versuchen
+STEAM_APPLIST_TTL  = 7200    # AppList alle 2h neu laden
+RETRY_UNKNOWN_TTL  = 7200    # "Depot XXXXX"-Eintraege nach 2h nochmal versuchen
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
