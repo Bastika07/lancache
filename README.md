@@ -1,150 +1,158 @@
-# 🎮 LanCache – Turnkey Full-Stack
+# LanCache Turnkey Full-Stack
 
-Ein vollständiger, selbst gehosteter Game-Cache für LAN-Partys und Heimnetzwerke.  
-Alle Images werden automatisch via GitHub Actions gebaut und über GHCR bereitgestellt – kein lokaler Build nötig.
+![GitHub Actions](https://img.shields.io/github/actions/workflow/status/Bastika07/lancache/build-and-push.yml?branch=master&label=Build)
+![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fbastika07-blue)
 
----
+A self-hosted, full-stack game cache for LAN parties and home networks — including monitoring, a live web dashboard and automatic Steam game name resolution.
 
-## 📁 Projektstruktur
+All custom images are built and published automatically via GitHub Actions to GHCR. No local `docker build` required.
 
-```
-lancache/
-├── docker-compose.yml              # Stack-Definition (nur GHCR-Images, kein build:)
-├── .env                            # Konfiguration (IP, Pfade, Passwörter)
-├── install.sh                      # Turnkey-Installer (ein Befehl)
-├── update.sh                       # Update auf neueste Images
-├── uninstall.sh                    # Vollständige Deinstallation
-├── monitor/
-│   ├── Dockerfile                  # Python-Exporter Image
-│   └── lancache_monitor_docker.py  # Log-Monitor, Prometheus-Exporter & Steam-Tracker
-├── prometheus/
-│   ├── Dockerfile                  # Prometheus Image (Config eingebaut)
-│   ├── prometheus.yml              # Scrape-Konfiguration
-│   └── rules/
-│       └── lancache_alert_rules.yml
-├── grafana/
-│   ├── Dockerfile                  # Grafana Image (Provisioning eingebaut)
-│   └── provisioning/
-│       ├── datasources/prometheus.yml
-│       └── dashboards/
-│           ├── dashboard.yml
-│           └── lancache_grafana_dashboard.json
-└── web/
-    ├── Dockerfile                  # Nginx + Entrypoint
-    ├── entrypoint.sh               # Generiert web_config.js aus Env-Vars
-    ├── nginx.conf
-    └── index.html                  # Web-Dashboard (Top-Spiele, Statistiken)
-```
+This docker-compose is meant to run out of the box with minimal changes to the environment variables for your local IP address and disk settings.
 
----
-
-## 🚀 Schnellstart
-
-### Einzeiler-Installation (Linux / Synology SSH)
+# Quick Start
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Bastika07/lancache/master/install.sh | sudo bash
 ```
 
-Der Installer erledigt automatisch:
-
-1. Docker-Verfügbarkeit prüfen
-2. IP-Adresse automatisch erkennen
-3. Installationsverzeichnis + Datenordner anlegen (`data/cache`, `data/logs`)
-4. `docker-compose.yml` und `.env` herunterladen
-5. Zufälliges Grafana-Passwort generieren
-6. Alle Images pullen und Stack starten
-7. Status aller Services prüfen
-
-### Optionale Parameter
-
-```bash
-LANCACHE_IP=10.0.0.1 \
-CACHE_ROOT=/volume1/docker/lancache \
-CACHE_DISK_SIZE=1000g \
-GRAFANA_PASSWORD=meinPasswort \
-bash install.sh
-```
-
-### Manuelle Installation
+Or manually:
 
 ```bash
 mkdir -p /opt/lancache && cd /opt/lancache
 curl -fsSL https://raw.githubusercontent.com/Bastika07/lancache/master/docker-compose.yml -o docker-compose.yml
 curl -fsSL https://raw.githubusercontent.com/Bastika07/lancache/master/.env -o .env
-nano .env                        # LANCACHE_IP und GRAFANA_PASSWORD anpassen
-mkdir -p data/cache data/logs    # Bind-Mount-Verzeichnisse anlegen
-docker compose pull
-docker compose up -d
+nano .env
+mkdir -p data/cache data/logs
+docker compose pull && docker compose up -d
 ```
 
----
+# Services
 
-## 🌐 Services & Ports
-
-| Service | Image | Port | Beschreibung |
+| Service | Image | Port | Description |
 |---|---|---|---|
-| `dns` | `lancachenet/lancache-dns` | 53 UDP+TCP | DNS-Server für Cache-Routing |
-| `monolithic` | `lancachenet/monolithic` | 80, 443 | Eigentlicher Game-Cache |
-| `log-monitor` | `ghcr.io/bastika07/lancache-monitor` | 9114 | Prometheus-Exporter + Steam-Depot-Tracker |
-| `prometheus` | `ghcr.io/bastika07/lancache-prometheus` | 9090 | Metriken-Datenbank |
-| `grafana` | `ghcr.io/bastika07/lancache-grafana` | 3000 | Grafana-Dashboard |
-| `web-stats` | `ghcr.io/bastika07/lancache-web` | 8080 | Web-Dashboard mit Top-Spiele-Liste |
+| `dns` | `lancachenet/lancache-dns` | 53 UDP+TCP | DNS server for cache routing |
+| `monolithic` | `lancachenet/monolithic` | 80, 443 | The actual game cache |
+| `log-monitor` | `ghcr.io/bastika07/lancache-monitor` | 9114 | Prometheus exporter + Steam depot tracker |
+| `web-stats` | `ghcr.io/bastika07/lancache-web` | 8080 | Web dashboard with top games list |
 
-### URLs nach der Installation
+After installation the following URLs are available:
 
-| URL | Beschreibung |
+| URL | Description |
 |---|---|
-| `http://LANCACHE_IP:8080` | Web-Dashboard (Top-Spiele, Statistiken) |
-| `http://LANCACHE_IP:3000` | Grafana (User: `admin`) |
-| `http://LANCACHE_IP:9114/metrics` | Prometheus Raw Metrics |
-| `http://LANCACHE_IP:9114/depots` | JSON: Steam-Depot-Statistiken |
-| `http://LANCACHE_IP:9114/health` | Health-Check Endpoint |
-| `http://LANCACHE_IP:9090` | Prometheus UI |
+| `http://LANCACHE_IP:8080` | Web dashboard (top games, statistics) |
+| `http://LANCACHE_IP:9114/metrics` | Prometheus raw metrics |
+| `http://LANCACHE_IP:9114/depots` | JSON: Steam depot statistics grouped by game |
+| `http://LANCACHE_IP:9114/health` | Health check endpoint |
 
----
+# Settings
 
-## ⚙️ Konfiguration (.env)
+> You **MUST** set at least `LANCACHE_IP` and `DNS_BIND_IP`. It is highly recommended that you set `CACHE_ROOT` to a folder of your choosing and configure `CACHE_DISK_SIZE` to match your available storage.
 
-| Variable | Standard | Beschreibung |
-|---|---|---|
-| `LANCACHE_IP` | – | IP des Cache-Servers (**Pflichtfeld**) |
-| `DNS_BIND_IP` | = `LANCACHE_IP` | IP für DNS-Binding |
-| `UPSTREAM_DNS` | `8.8.8.8` | Fallback-DNS |
-| `CACHE_ROOT` | `/opt/lancache/data` | Speicherort für Cache und Logs |
-| `CACHE_DISK_SIZE` | `500g` | Maximale Cache-Größe |
-| `MIN_FREE_DISK` | `10g` | Mindest-Freispeicher |
-| `CACHE_INDEX_SIZE` | `500m` | Nginx Cache-Index RAM |
-| `CACHE_MAX_AGE` | `3650d` | Maximales Alter gecachter Dateien |
-| `GRAFANA_PASSWORD` | `changeme` | Grafana Admin-Passwort |
-| `TZ` | `Europe/Berlin` | Zeitzone |
-| `LOG_RETENTION_DAYS` | `30` | Log-Aufbewahrungsdauer |
-| `PROMETHEUS_PORT` | `9114` | Port des Log-Monitors |
+## `LANCACHE_IP`
 
----
+This provides the IP address of the cache server. The DNS service will advertise all cached services (Steam, Epic, Battle.net, etc.) on this IP.
 
-## 🎮 Steam Depot-Tracking
+If your cache host has exactly one IP address (e.g. `192.168.0.10`), specify that here.
 
-Der `log-monitor` erkennt automatisch Steam-Downloads anhand des URL-Musters `/depot/{ID}/chunk/...` in den Nginx-Access-Logs.
+> **Note:** unless your cache host is at `10.0.39.1`, you will want to change this value.
 
-**Features:**
-- **Automatische Namensauflösung** – Depot-IDs werden im Hintergrund via Steam API zu echten Spielnamen aufgelöst (Rate-limited, gecacht in `/tmp/steam_names.json`)
-- **Statistiken pro Spiel** – Bytes vom Cache, Bytes heruntergeladen, Hit Rate, Anzahl Treffer
-- **Top-Spiele-Tabelle** im Web-Dashboard unter Port 8080, sortiert nach gecachten Bytes
+## `DNS_BIND_IP`
 
-### `/depots` Endpoint
+Sets the IP address that the DNS service listens on. In most setups this is the same as `LANCACHE_IP`.
 
-```
-GET http://LANCACHE_IP:9114/depots?limit=50
-```
+There are two ways to make your network use the cache:
 
-Beispiel-Antwort:
+1. Advertise the IP given in `DNS_BIND_IP` via DHCP to your network as a nameserver. All clients using this DNS will automatically be routed through the cache.
+2. Use the configuration generators from [UKLANs' cache-domains](https://github.com/uklans/cache-domains) to load entries into your existing DNS infrastructure.
+
+> **Note:** unless your cache host is at `10.0.39.1`, you will want to change this value.
+
+## `UPSTREAM_DNS`
+
+Upstream DNS resolver used for all requests that are not matched by `lancache-dns` (e.g. regular websites, local hostnames).
+
+### Example resolvers
+
+- Google DNS: `8.8.8.8` / `8.8.4.4`
+- Cloudflare: `1.1.1.1`
+- OpenDNS: `208.67.222.222`
+
+## `CACHE_ROOT`
+
+Base directory for cached data (`CACHE_ROOT/cache`) and access logs (`CACHE_ROOT/logs`).
+
+Ideally this should be on a dedicated storage device separate from your system root.
+
+> **Note:** defaults to `/opt/lancache/data`. You almost certainly want to change this.
+
+## `CACHE_DISK_SIZE`
+
+Upper limit for cached data. When the total stored amount approaches this limit, the cache server will automatically prune the least recently used content.
+
+> **Note:** must be given in gigabytes with `g` suffix (e.g. `500g`) or terabytes with `t` suffix (e.g. `2t`).
+
+## `MIN_FREE_DISK`
+
+Minimum free disk space that must be kept at all times. Prevents the disk from becoming completely full. When free space drops below this value, the cache server prunes least recently used content.
+
+> **Note:** defaults to `10g`.
+
+## `CACHE_INDEX_SIZE`
+
+Memory allocated for the nginx cache index. Increase this if you have a large cache.
+
+> **Note:** we recommend 250m per 1 TB of `CACHE_DISK_SIZE`. Defaults to `500m`.
+
+## `CACHE_MAX_AGE`
+
+Maximum age of cached data before it is considered expired. In most cases `CACHE_DISK_SIZE` will be the limiting factor before this is reached.
+
+> **Note:** must be given as a number of days with `d` suffix (e.g. `3650d`).
+
+## `GRAFANA_PASSWORD`
+
+Admin password for Grafana (only relevant when using the full stack with Prometheus and Grafana). The installer generates a random password automatically if not set.
+
+> **Note:** defaults to `changeme`. Change this before exposing Grafana to your network.
+
+## `TZ`
+
+Timezone used by all containers. Affects log timestamps.
+
+For a full list of valid timezone names see https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+
+> **Note:** defaults to `Europe/Berlin`.
+
+## `PROMETHEUS_PORT`
+
+Port on which the `log-monitor` exposes metrics and the `/depots` endpoint.
+
+> **Note:** defaults to `9114`.
+
+## `LOG_RETENTION_DAYS`
+
+Number of days access logs are kept.
+
+> **Note:** defaults to `30`.
+
+# Steam Game Tracking
+
+The `log-monitor` service automatically detects Steam downloads by matching the URL pattern `/depot/{ID}/chunk/...` in the nginx access logs.
+
+- Depot IDs are resolved to game names in the background via the Steam API (rate-limited, cached in `/tmp/steam_names.json` inside the container)
+- Multiple depots belonging to the same game (base game, DLCs, language packs) are automatically grouped together
+- The web dashboard at `:8080` shows a top games table sorted by bytes served from cache
+- The raw data is available as JSON at `http://LANCACHE_IP:9114/depots`
+
+Example response from `/depots`:
 
 ```json
 [
   {
-    "depot_id": 228980,
-    "name": "Steamworks Common Redistributables",
+    "app_id": 570,
+    "name": "Dota 2",
+    "depots": [373301, 373302, 373303],
+    "depot_count": 3,
     "bytes_hit": 10737418240,
     "bytes_miss": 1073741824,
     "bytes_total": 11811160064,
@@ -155,60 +163,31 @@ Beispiel-Antwort:
 ]
 ```
 
----
-
-## 🔄 Update
+# Update
 
 ```bash
-cd /opt/lancache
-bash update.sh
+cd /opt/lancache && bash update.sh
 ```
 
-Oder manuell:
+Or manually:
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose pull && docker compose up -d
 ```
 
----
-
-## 🗑️ Deinstallation
+# Uninstall
 
 ```bash
-cd /opt/lancache
-bash uninstall.sh
+cd /opt/lancache && bash uninstall.sh
 ```
 
-> ⚠️ Löscht alle Container, Volumes und optional die Cache-Daten.
+> **Warning:** this will remove all containers and volumes. Cache data will be deleted if you confirm during the script.
 
----
+# Synology NAS
 
-## 🏗️ CI/CD (GitHub Actions)
+Install via SSH — do not use the Container Manager GUI, as it may attempt to build images locally.
 
-### `build-and-push.yml`
-
-Wird bei jedem Push auf `master` ausgelöst, wenn Dateien in `monitor/`, `prometheus/`, `grafana/` oder `web/` geändert wurden. Manueller Trigger jederzeit möglich.
-
-Baut und pusht 4 Images nach GHCR:
-- `ghcr.io/bastika07/lancache-monitor`
-- `ghcr.io/bastika07/lancache-prometheus`
-- `ghcr.io/bastika07/lancache-grafana`
-- `ghcr.io/bastika07/lancache-web`
-
-Tags: `latest`, `sha-XXXXXXX`, Branch-Name
-
-### `release.yml`
-
-Erstellt bei Git-Tags (`v*`) automatisch ein GitHub Release.
-
----
-
-## 🖥️ Synology NAS
-
-Empfehlung: Installation via SSH, nicht über den Container Manager.
-
-SSH aktivieren: **Systemsteuerung → Terminal & SNMP → SSH-Dienst aktivieren**
+Enable SSH under: **Control Panel → Terminal & SNMP → Enable SSH service**
 
 ```bash
 ssh admin@SYNOLOGY-IP
@@ -218,49 +197,34 @@ CACHE_DISK_SIZE=2000g \
 curl -fsSL https://raw.githubusercontent.com/Bastika07/lancache/master/install.sh | sudo bash
 ```
 
-> **Hinweis:** Der Container Manager versucht Images lokal zu bauen wenn er `build:` Sektionen findet. Immer die aktuelle `docker-compose.yml` aus dem Repo verwenden – diese enthält ausschließlich `image:` Direktiven.
+# TrueNAS
 
----
-
-## 🏛️ Architektur
+Use the slim `docker-compose.yml` without Prometheus and Grafana. Specify absolute paths for all volumes, for example:
 
 ```
-Clients im Netz
-    │
-    ▼  DNS → LANCACHE_IP
-  lancache-dns  (Port 53)
-    │
-    ▼  HTTP/HTTPS
-  monolithic  (Port 80/443)
-    │  schreibt Access-Logs
-    ▼
-  log-monitor  (Port 9114)
-    ├── /metrics  → Prometheus scrapt alle 15s
-    ├── /depots   → Steam-Depot-Statistiken (JSON)
-    └── /health   → Health-Check
-         │
-         ▼
-  prometheus  (Port 9090)
-         │
-         ▼
-  grafana  (Port 3000)
-
-  web-stats  (Port 8080) ──── fragt /depots ab ──→ log-monitor
+/mnt/SSD/docker/lancache/cache:/data/cache
+/mnt/SSD/docker/lancache/logs:/data/logs
 ```
 
----
+Create the directories before starting the stack:
 
-## 🛠️ Troubleshooting
+```bash
+mkdir -p /mnt/SSD/docker/lancache/cache
+mkdir -p /mnt/SSD/docker/lancache/logs
+```
 
-| Problem | Lösung |
+# Troubleshooting
+
+| Problem | Solution |
 |---|---|
-| `unable to evaluate symlinks in Dockerfile path` | Alte `docker-compose.yml` mit `build:` – aktuelle Datei vom Repo laden |
-| `bind mount failed: ... does not exist` | `mkdir -p $CACHE_ROOT/cache $CACHE_ROOT/logs` manuell anlegen |
-| Web-Dashboard zeigt „Monitor nicht erreichbar" | Port 9114 auf `0.0.0.0` binden statt `127.0.0.1` in `docker-compose.yml` |
-| Steam-Spielnamen werden nicht aufgelöst | Monitor-Container benötigt Internetzugang (Steam API) |
-| Grafana leer nach Start | Einige Minuten warten – Provisioning läuft beim ersten Start |
-| Container Manager GUI zeigt Fehler | Stack immer per SSH mit `docker compose` starten |
+| `unable to evaluate symlinks in Dockerfile path` | Old `docker-compose.yml` with `build:` section — download the current file from the repo |
+| `bind mount failed: path does not exist` | Create `$CACHE_ROOT/cache` and `$CACHE_ROOT/logs` manually before starting |
+| Web dashboard shows "Monitor not reachable" | Bind port 9114 to `0.0.0.0` instead of `127.0.0.1` in `docker-compose.yml` |
+| Steam game names not resolved | The `log-monitor` container requires internet access to reach the Steam API |
+| Grafana empty after start | Wait a few minutes — provisioning runs on the first startup |
 
----
+# More Information
 
-> Basiert auf [lancachenet](https://github.com/lancachenet) – erweitert um Monitoring, Steam-Depot-Tracking und Turnkey-Installer.
+The LanCache docker stack uses the upstream [lancachenet](https://github.com/lancachenet) images for DNS and caching, and adds custom monitoring, Steam depot tracking and a turnkey installer on top.
+
+For general LanCache documentation and FAQ see https://lancache.net/docs/faq/
