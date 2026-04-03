@@ -38,8 +38,6 @@
     .hit-rate.bad  { color: #fc8181; }
     .btn { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; text-decoration: none; display: inline-block; transition: background 0.2s; }
     .btn:hover { background: #3d4a5e; }
-.btn-off { background: #3d1f1f; border-color: #7f3030; color: #fc8181; }
-.btn-off:hover { background: #4e2020; }
     .empty { color: #718096; text-align: center; padding: 40px; font-size: 0.9rem; }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #48bb78; display: inline-block; margin-right: 6px; }
     .status-dot.offline { background: #fc8181; }
@@ -88,6 +86,7 @@
       <span style="margin-left:auto;">
         <a class="btn" href="#" onclick="loadDepots(); return false;">↻ Aktualisieren</a>
         <a class="btn" id="raw-btn" href="#" target="_blank" style="margin-left:6px;">📊 Raw Metrics</a>
+        <button id="refresh-toggle" class="btn" onclick="toggleAutoRefresh()" style="margin-left:6px;">⏸ Auto-Refresh AN</button>
       </span>
     </h2>
     <table id="games-table">
@@ -213,22 +212,7 @@ async function loadDepots() {
 
 // Init
 loadDepots();
-let autoRefresh = true;
-let refreshInterval = setInterval(loadDepots, 30000);
-
-function toggleAutoRefresh() {
-  autoRefresh = !autoRefresh;
-  const btn = document.getElementById('refresh-toggle');
-  if (autoRefresh) {
-    refreshInterval = setInterval(loadDepots, 30000);
-    btn.textContent = '⏸ Auto-Refresh AN';
-    btn.classList.remove('btn-off');
-  } else {
-    clearInterval(refreshInterval);
-    btn.textContent = '▶ Auto-Refresh AUS';
-    btn.classList.add('btn-off');
-  }
-}
+setInterval(loadDepots, 30000);
 </script>
 </body>
 </html>
