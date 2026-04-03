@@ -74,7 +74,7 @@
     <div class="card">
       <div class="card-label">Spiele im Cache</div>
       <div class="card-value" id="game-count">–</div>
-      <div class="card-sub">Steam Depots gesamt</div>
+      <div class="card-sub" id="depot-count-sub">Einträge gesamt</div>
     </div>
   </div>
 
@@ -139,18 +139,39 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+const SOURCE_BADGES = {
+  'applist':    ['AppList',   '#48bb78'],
+  'appdetails': ['Steam API', '#63b3ed'],
+  'builtin':    ['Builtin',   '#a0aec0'],
+  'unknown':    ['?',         '#fc8181'],
+};
+
+function sourceBadge(source) {
+  const [label, color] = SOURCE_BADGES[source] || SOURCE_BADGES['unknown'];
+  return `<span style="font-size:0.65rem;background:#1e2533;border:1px solid #2d3748;` +
+         `border-radius:3px;padding:1px 5px;color:${color};margin-left:6px;"` +
+         ` title="Quelle: ${label}">${label}</span>`;
+}
+
 function renderRows(data) {
   if (!data.length) {
     document.getElementById('games-body').innerHTML =
-      '<tr><td colspan="6" class="empty">Noch keine Steam-Daten im Cache vorhanden.</td></tr>';
+      '<tr><td colspan="6" class="empty">Noch keine Daten im Cache vorhanden.</td></tr>';
     return;
   }
-  const maxBytes = data[0].bytes_hit || 1;
-  const rows = data.map((g, i) => `<tr>
+  const rows = data.map((g, i) => {
+    const multi = g.depot_count > 1;
+    const depotInfo = multi
+      ? `App&nbsp;${g.app_id} &middot; ${g.depot_count}&nbsp;Depots`
+      : `Depot&nbsp;${(g.depots && g.depots[0]) || g.app_id}`;
+    const cdnBadge = g.cdn !== 'steam'
+      ? `<span style="font-size:0.65rem;background:#2d3748;border-radius:3px;padding:1px 5px;color:#a0aec0;margin-left:6px;">${escHtml(g.cdn)}</span>`
+      : '';
+    return `<tr>
     <td class="rank ${rankClass(i)}">${i + 1}</td>
     <td>
-      <div class="game-name">${escHtml(g.name)}</div>
-      <div class="depot-id">Depot ${g.depot_id}</div>
+      <div class="game-name">${escHtml(g.name)}${cdnBadge}</div>
+      <div class="depot-id">${depotInfo}${sourceBadge(g.source)}</div>
     </td>
     <td>${fmtBytes(g.bytes_hit)}</td>
     <td>${fmtBytes(g.bytes_miss)}</td>
@@ -161,7 +182,8 @@ function renderRows(data) {
       </div>
     </td>
     <td>${g.hits} / ${g.hits + g.misses}</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
   document.getElementById('games-body').innerHTML = rows;
 }
 
@@ -187,7 +209,12 @@ async function loadDepots() {
     document.getElementById('hit-rate').textContent   = total > 0 ? (totalHit / total * 100).toFixed(1) + '%' : '0%';
     document.getElementById('bytes-hit').textContent  = fmtBytes(totalHit);
     document.getElementById('bytes-miss').textContent = fmtBytes(totalMiss);
-    document.getElementById('game-count').textContent = allDepots.length;  // ← echter Count
+    document.getElementById('game-count').textContent = allDepots.length;
+    // Untertitel: Aufschlüsselung nach CDN
+    const cdnCounts = {};
+    allDepots.forEach(g => { cdnCounts[g.cdn] = (cdnCounts[g.cdn] || 0) + 1; });
+    const cdnParts = Object.entries(cdnCounts).map(([cdn, n]) => `${n} ${cdn}`).join(', ');
+    document.getElementById('depot-count-sub').textContent = cdnParts || 'Einträge gesamt';
 
     // Tabelle: nur Top 25, Rest per Button
     renderRows(allDepots.slice(0, TABLE_LIMIT));
@@ -212,7 +239,22 @@ async function loadDepots() {
 
 // Init
 loadDepots();
-setInterval(loadDepots, 30000);
+let autoRefresh = true;
+let refreshInterval = setInterval(loadDepots, 30000);
+
+function toggleAutoRefresh() {
+  autoRefresh = !autoRefresh;
+  const btn = document.getElementById('refresh-toggle');
+  if (autoRefresh) {
+    refreshInterval = setInterval(loadDepots, 30000);
+    btn.textContent = '⏸ Auto-Refresh AN';
+    btn.classList.remove('btn-off');
+  } else {
+    clearInterval(refreshInterval);
+    btn.textContent = '▶ Auto-Refresh AUS';
+    btn.classList.add('btn-off');
+  }
+}
 </script>
 </body>
 </html>
