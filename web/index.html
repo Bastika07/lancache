@@ -8,7 +8,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
-    header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 16px 24px; display: flex; align-items: center; }
+    header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
     header h1 { font-size: 1.4rem; font-weight: 700; color: #63b3ed; }
     header span { font-size: 0.85rem; color: #718096; }
     .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
@@ -18,19 +18,19 @@
     .card-value { font-size: 1.8rem; font-weight: 700; color: #63b3ed; }
     .card-sub { font-size: 0.8rem; color: #718096; margin-top: 4px; }
     .section { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px; padding: 24px; margin-bottom: 24px; }
-    .section h2 { font-size: 1rem; font-weight: 600; color: #a0aec0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .section h2 { font-size: 1rem; font-weight: 600; color: #a0aec0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
     table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     thead th { text-align: left; padding: 10px 12px; color: #718096; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid #2d3748; }
-    tbody tr.main-row { border-bottom: 1px solid #1e2533; transition: background 0.15s; }
-    tbody tr.main-row:hover { background: #232b3e; }
-    tbody td { padding: 12px; color: #e2e8f0; vertical-align: middle; }
+    tbody tr { border-bottom: 1px solid #1e2533; transition: background 0.15s; }
+    tbody tr:hover { background: #232b3e; }
+    tbody td { padding: 12px; color: #e2e8f0; }
     .rank { color: #718096; font-weight: 600; width: 36px; }
     .rank-1 { color: #f6c90e; }
     .rank-2 { color: #a8b2c0; }
     .rank-3 { color: #cd7f32; }
     .game-name { font-weight: 500; }
-    .game-meta { font-size: 0.75rem; color: #718096; margin-top: 2px; }
-    .bar-wrap { background: #2d3748; border-radius: 4px; height: 6px; min-width: 80px; margin-top: 4px; }
+    .depot-id { font-size: 0.75rem; color: #718096; }
+    .bar-wrap { background: #2d3748; border-radius: 4px; height: 6px; min-width: 80px; }
     .bar-fill { background: #48bb78; border-radius: 4px; height: 6px; transition: width 0.5s; }
     .hit-rate { font-weight: 600; }
     .hit-rate.good { color: #48bb78; }
@@ -39,60 +39,56 @@
     .btn { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; text-decoration: none; display: inline-block; transition: background 0.2s; }
     .btn:hover { background: #3d4a5e; }
     .empty { color: #718096; text-align: center; padding: 40px; font-size: 0.9rem; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #48bb78; display: inline-block; flex-shrink: 0; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #48bb78; display: inline-block; margin-right: 6px; }
     .status-dot.offline { background: #fc8181; }
     .show-more { text-align: center; padding: 16px; }
-    .chevron { font-size: 0.65rem; color: #718096; margin-left: 5px; display: inline-block; transition: transform 0.2s; cursor: pointer; }
-    .chevron.open { transform: rotate(90deg); }
-    .depot-row { display: none; }
-    .depot-row.open { display: table-row; }
-    .depot-row td { background: #141824; padding: 8px 12px 12px 52px; border-bottom: 1px solid #2d3748; }
-    .depot-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .depot-tag { background: #1e2533; border: 1px solid #2d3748; border-radius: 4px; padding: 2px 8px; font-size: 0.72rem; color: #a0aec0; font-family: monospace; }
+    .show-more .btn { padding: 8px 24px; }
   </style>
 </head>
 <body>
 <header>
-  <div style="flex:1;">
-    <h1>LanCache Dashboard</h1>
+  <div>
+    <h1>🎮 LanCache Dashboard</h1>
     <span id="last-update">Lade...</span>
   </div>
 </header>
 
 <div class="container">
+  <!-- Stat Cards -->
   <div class="cards">
     <div class="card">
       <div class="card-label">Cache Hit Rate</div>
-      <div class="card-value" id="hit-rate">-</div>
+      <div class="card-value" id="hit-rate">–</div>
       <div class="card-sub">Gesamt</div>
     </div>
     <div class="card">
       <div class="card-label">Vom Cache geliefert</div>
-      <div class="card-value" id="bytes-hit">-</div>
+      <div class="card-value" id="bytes-hit">–</div>
       <div class="card-sub">gespart</div>
     </div>
     <div class="card">
       <div class="card-label">Heruntergeladen</div>
-      <div class="card-value" id="bytes-miss">-</div>
+      <div class="card-value" id="bytes-miss">–</div>
       <div class="card-sub">vom Internet</div>
     </div>
     <div class="card">
       <div class="card-label">Spiele im Cache</div>
-      <div class="card-value" id="game-count">-</div>
-      <div class="card-sub" id="depot-count-sub">Steam-Spiele gesamt</div>
+      <div class="card-value" id="game-count">–</div>
+      <div class="card-sub">Steam Depots gesamt</div>
     </div>
   </div>
 
+  <!-- Top Spiele -->
   <div class="section">
     <h2>
       <span class="status-dot" id="status-dot"></span>
-      Top Spiele vom Cache
-      <span style="margin-left:auto; display:flex; gap:6px;">
-        <a class="btn" href="#" onclick="loadDepots(); return false;">Aktualisieren</a>
-        <a class="btn" id="raw-btn" href="#" target="_blank">Raw Metrics</a>
+      🏆 Top Spiele vom Cache
+      <span style="margin-left:auto;">
+        <a class="btn" href="#" onclick="loadDepots(); return false;">↻ Aktualisieren</a>
+        <a class="btn" id="raw-btn" href="#" target="_blank" style="margin-left:6px;">📊 Raw Metrics</a>
       </span>
     </h2>
-    <table>
+    <table id="games-table">
       <thead>
         <tr>
           <th class="rank">#</th>
@@ -114,75 +110,62 @@
 </div>
 
 <script>
-const METRICS_URL  = (typeof CONFIG !== 'undefined') ? CONFIG.metricsUrl : 'http://localhost:9114/metrics';
+const METRICS_URL  = (typeof CONFIG !== 'undefined') ? CONFIG.metricsUrl  : 'http://localhost:9114/metrics';
 const MONITOR_BASE = METRICS_URL.replace('/metrics', '');
 const TABLE_LIMIT  = 25;
-let allGames = [];
+
+let allDepots = [];
 
 document.getElementById('raw-btn').href = METRICS_URL;
 
 function fmtBytes(b) {
-  if (!b || b === 0) return '0 B';
-  const u = ['B','KB','MB','GB','TB'];
+  if (b === 0) return '0 B';
+  const units = ['B','KB','MB','GB','TB'];
   let i = 0;
-  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-  return b.toFixed(i > 1 ? 2 : 0) + ' ' + u[i];
-}
-function rankClass(i) { return i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':''; }
-function hitClass(r)  { return r>=80?'good':r>=50?'ok':'bad'; }
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-function toggleDepots(idx) {
-  const row  = document.getElementById('dr-'+idx);
-  const chev = document.getElementById('cv-'+idx);
-  if (!row) return;
-  row.classList.toggle('open');
-  chev.classList.toggle('open');
+  while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i > 1 ? 2 : 0) + ' ' + units[i];
 }
 
-function buildRows(data) {
-  if (!data.length) return '<tr><td colspan="6" class="empty">Noch keine Steam-Daten im Cache.</td></tr>';
-  let html = '';
-  data.forEach((g, i) => {
-    const multi = g.depot_count > 1;
-    const meta  = multi
-      ? `App&nbsp;${g.app_id} &middot; ${g.depot_count}&nbsp;Depots <span class="chevron" id="cv-${i}">&#9658;</span>`
-      : `Depot&nbsp;${(g.depots && g.depots[0]) || g.app_id}`;
+function rankClass(i) {
+  return i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : '';
+}
 
-    html += `<tr class="main-row" ${multi ? `onclick="toggleDepots(${i})" style="cursor:pointer"` : ''}>
-      <td class="rank ${rankClass(i)}">${i+1}</td>
-      <td>
-        <div class="game-name">${esc(g.name)}</div>
-        <div class="game-meta">${meta}</div>
-      </td>
-      <td>${fmtBytes(g.bytes_hit)}</td>
-      <td>${fmtBytes(g.bytes_miss)}</td>
-      <td>
-        <span class="hit-rate ${hitClass(g.hit_rate)}">${g.hit_rate}%</span>
-        <div class="bar-wrap"><div class="bar-fill" style="width:${g.hit_rate}%"></div></div>
-      </td>
-      <td>${g.hits} / ${g.hits + g.misses}</td>
-    </tr>`;
+function hitClass(rate) {
+  return rate >= 80 ? 'good' : rate >= 50 ? 'ok' : 'bad';
+}
 
-    if (multi) {
-      const tags = (g.depots||[]).map(d => `<span class="depot-tag">${d}</span>`).join('');
-      html += `<tr class="depot-row" id="dr-${i}">
-        <td colspan="6">
-          <span style="color:#718096;font-size:0.75rem;">Depot-IDs dieses Spiels:</span>
-          <div class="depot-list">${tags}</div>
-        </td>
-      </tr>`;
-    }
-  });
-  return html;
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function renderRows(data) {
-  document.getElementById('games-body').innerHTML = buildRows(data);
+  if (!data.length) {
+    document.getElementById('games-body').innerHTML =
+      '<tr><td colspan="6" class="empty">Noch keine Steam-Daten im Cache vorhanden.</td></tr>';
+    return;
+  }
+  const maxBytes = data[0].bytes_hit || 1;
+  const rows = data.map((g, i) => `<tr>
+    <td class="rank ${rankClass(i)}">${i + 1}</td>
+    <td>
+      <div class="game-name">${escHtml(g.name)}</div>
+      <div class="depot-id">Depot ${g.depot_id}</div>
+    </td>
+    <td>${fmtBytes(g.bytes_hit)}</td>
+    <td>${fmtBytes(g.bytes_miss)}</td>
+    <td>
+      <span class="hit-rate ${hitClass(g.hit_rate)}">${g.hit_rate}%</span>
+      <div class="bar-wrap" style="margin-top:4px;">
+        <div class="bar-fill" style="width:${g.hit_rate}%"></div>
+      </div>
+    </td>
+    <td>${g.hits} / ${g.hits + g.misses}</td>
+  </tr>`).join('');
+  document.getElementById('games-body').innerHTML = rows;
 }
 
 function showAll() {
-  renderRows(allGames);
+  renderRows(allDepots);
   document.getElementById('show-more-wrap').style.display = 'none';
 }
 
@@ -191,38 +174,44 @@ async function loadDepots() {
   try {
     const r = await fetch(url);
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    allGames = await r.json();
+    allDepots = await r.json();
+    // WSUS aus Spielliste herausfiltern (kein Spiel, sondern Windows Updates)
+    allDepots = allDepots.filter(d => d.cdn !== 'wsus');
+
     document.getElementById('status-dot').className = 'status-dot';
 
-    const totalHit    = allGames.reduce((s,g) => s + g.bytes_hit,  0);
-    const totalMiss   = allGames.reduce((s,g) => s + g.bytes_miss, 0);
-    const totalDepots = allGames.reduce((s,g) => s + g.depot_count, 0);
-    const total       = totalHit + totalMiss;
+    // Summary-Karten – echte Werte aus ALLEN Depots
+    const totalHit  = allDepots.reduce((s, d) => s + d.bytes_hit,  0);
+    const totalMiss = allDepots.reduce((s, d) => s + d.bytes_miss, 0);
+    const total     = totalHit + totalMiss;
 
-    document.getElementById('hit-rate').textContent      = total > 0 ? (totalHit/total*100).toFixed(1)+'%' : '0%';
-    document.getElementById('bytes-hit').textContent     = fmtBytes(totalHit);
-    document.getElementById('bytes-miss').textContent    = fmtBytes(totalMiss);
-    document.getElementById('game-count').textContent    = allGames.length;
-    document.getElementById('depot-count-sub').textContent = totalDepots + ' Depots gesamt';
+    document.getElementById('hit-rate').textContent   = total > 0 ? (totalHit / total * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('bytes-hit').textContent  = fmtBytes(totalHit);
+    document.getElementById('bytes-miss').textContent = fmtBytes(totalMiss);
+    document.getElementById('game-count').textContent = allDepots.length;  // ← echter Count
 
-    renderRows(allGames.slice(0, TABLE_LIMIT));
+    // Tabelle: nur Top 25, Rest per Button
+    renderRows(allDepots.slice(0, TABLE_LIMIT));
 
-    const remaining = allGames.length - TABLE_LIMIT;
-    const wrap = document.getElementById('show-more-wrap');
+    const remaining = allDepots.length - TABLE_LIMIT;
+    const moreWrap = document.getElementById('show-more-wrap');
     if (remaining > 0) {
       document.getElementById('remaining-count').textContent = remaining;
-      wrap.style.display = 'block';
+      moreWrap.style.display = 'block';
     } else {
-      wrap.style.display = 'none';
+      moreWrap.style.display = 'none';
     }
+
     document.getElementById('last-update').textContent = 'Zuletzt: ' + new Date().toLocaleTimeString('de-DE');
-  } catch(e) {
+
+  } catch (e) {
     document.getElementById('status-dot').className = 'status-dot offline';
     document.getElementById('games-body').innerHTML =
-      `<tr><td colspan="6" class="empty">Monitor nicht erreichbar: ${esc(e.message)}<br><small>${esc(url)}</small></td></tr>`;
+      `<tr><td colspan="6" class="empty">Monitor nicht erreichbar: ${escHtml(e.message)}<br><small>${escHtml(url)}</small></td></tr>`;
   }
 }
 
+// Init
 loadDepots();
 setInterval(loadDepots, 30000);
 </script>
