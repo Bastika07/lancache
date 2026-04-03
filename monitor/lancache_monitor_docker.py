@@ -70,18 +70,48 @@ def load_applist():
 
 
 def fetch_applist():
-    """Laedt die komplette Steam-AppList von der offiziellen API und cached sie."""
+    """
+    Laedt die komplette Steam-AppList und cached sie.
+
+    Mit STEAM_API_KEY (env):
+      -> IStoreService/GetAppList/v1/ (aktuell, paginiert, bis ~120k Apps)
+    Ohne API Key:
+      -> AppList deaktiviert, nur appdetails-Fallback wird genutzt
+    """
+    api_key = os.getenv("STEAM_API_KEY", "").strip()
+    if not api_key:
+        logger.info("Kein STEAM_API_KEY gesetzt – AppList deaktiviert, nutze appdetails-Fallback")
+        return {}
+
+    apps = {}
+    last_appid = 0
+    page = 0
     try:
-        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
-        with urlopen(url, timeout=15) as r:
-            data = json.loads(r.read())
-        apps_raw = data.get("applist", {}).get("apps", [])
-        # {app_id: name} als int-Keys (werden als str in JSON gespeichert)
-        apps = {str(a["appid"]): a["name"] for a in apps_raw if a.get("name")}
+        while True:
+            page += 1
+            url = (
+                f"https://api.steampowered.com/IStoreService/GetAppList/v1/"
+                f"?key={api_key}&include_games=true&include_dlc=true"
+                f"&include_software=false&include_videos=false&include_hardware=false"
+                f"&max_results=50000&last_appid={last_appid}"
+            )
+            with urlopen(url, timeout=15) as r:
+                data = json.loads(r.read())
+            resp = data.get("response", {})
+            apps_raw = resp.get("apps", [])
+            for a in apps_raw:
+                if a.get("name"):
+                    apps[str(a["appid"])] = a["name"]
+            logger.info(f"AppList Seite {page}: {len(apps_raw)} Eintraege geladen")
+            # Paginierung: have_more_results + last_appid
+            if resp.get("have_more_results") and apps_raw:
+                last_appid = apps_raw[-1]["appid"]
+            else:
+                break
         payload = {"_fetched": time.time(), "apps": apps}
         with open(STEAM_APPLIST_FILE, "w") as f:
             json.dump(payload, f)
-        logger.info(f"Steam AppList gecacht: {len(apps)} Apps")
+        logger.info(f"Steam AppList gecacht: {len(apps)} Apps gesamt")
         return apps
     except Exception as e:
         logger.warning(f"AppList-Abruf fehlgeschlagen: {e}")
