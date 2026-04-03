@@ -10,9 +10,11 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STEAM_CACHE_FILE = "/tmp/steam_names.json"
+STEAM_CACHE_FILE   = "/tmp/steam_names.json"
+STEAM_APPLIST_FILE = "/tmp/steam_applist.json"
+STEAM_APPLIST_TTL  = 86400  # 24h in Sekunden
 
-# ── Blizzard Game-Code → Name ─────────────────────────────────────────────────
+# ── Blizzard: Hardcoded Game-Code → Name ─────────────────────────────────────
 BLIZZARD_GAMES = {
     "hs":          "Hearthstone",
     "hsb":         "Hearthstone",
@@ -53,13 +55,92 @@ def save_steam_cache(cache):
     except Exception:
         pass
 
+# ── Steam AppList Cache (GetAppList/v2) ───────────────────────────────────────
+def load_applist():
+    """Laedt gecachte AppList vom Disk. Gibt dict {app_id(int): name} zurueck."""
+    try:
+        with open(STEAM_APPLIST_FILE) as f:
+            data = json.load(f)
+        # Pruefen ob TTL noch gueltig
+        if time.time() - data.get("_fetched", 0) < STEAM_APPLIST_TTL:
+            return data.get("apps", {})
+    except Exception:
+        pass
+    return {}
+
+
+def fetch_applist():
+    """Laedt die komplette Steam-AppList von der offiziellen API und cached sie."""
+    try:
+        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+        with urlopen(url, timeout=15) as r:
+            data = json.loads(r.read())
+        apps_raw = data.get("applist", {}).get("apps", [])
+        # {app_id: name} als int-Keys (werden als str in JSON gespeichert)
+        apps = {str(a["appid"]): a["name"] for a in apps_raw if a.get("name")}
+        payload = {"_fetched": time.time(), "apps": apps}
+        with open(STEAM_APPLIST_FILE, "w") as f:
+            json.dump(payload, f)
+        logger.info(f"Steam AppList gecacht: {len(apps)} Apps")
+        return apps
+    except Exception as e:
+        logger.warning(f"AppList-Abruf fehlgeschlagen: {e}")
+        return {}
+
+
+# Globale AppList (wird beim Start + taeglich aktualisiert)
+_applist: dict = {}
+_applist_lock = threading.Lock()
+
+
+def get_applist() -> dict:
+    global _applist
+    with _applist_lock:
+        return _applist
+
+
+def applist_refresh_worker():
+    """Background-Thread: AppList einmal laden + taeglich erneuern."""
+    global _applist
+    # Zuerst aus Disk laden
+    cached = load_applist()
+    with _applist_lock:
+        _applist = cached
+    if not cached:
+        fresh = fetch_applist()
+        with _applist_lock:
+            _applist = fresh
+    while True:
+        time.sleep(STEAM_APPLIST_TTL)
+        fresh = fetch_applist()
+        if fresh:
+            with _applist_lock:
+                _applist = fresh
+
+
+
 
 def resolve_steam_app(depot_id, cache):
     key = f"depot_{depot_id}"
     if key in cache:
         entry = cache[key]
         return entry.get("app_id", depot_id), entry.get("name", f"Depot {depot_id}")
+
+    applist = get_applist()
     candidates = [depot_id] + list(range(depot_id - 1, depot_id - 11, -1))
+
+    # 1. Schnellsuche in der AppList (kein API-Call noetig)
+    for app_id in candidates:
+        if app_id <= 0:
+            continue
+        name = applist.get(str(app_id))
+        if name:
+            cache[key] = {"app_id": app_id, "name": name, "source": "applist"}
+            save_steam_cache(cache)
+            logger.info(f"Steam Depot {depot_id} -> App {app_id}: {name} [AppList]")
+            return app_id, name
+
+    # 2. Fallback: appdetails-API (fuer DLCs, Tools etc. die ggf. nicht in AppList sind)
     for app_id in candidates:
         if app_id <= 0:
             continue
@@ -71,13 +152,14 @@ def resolve_steam_app(depot_id, cache):
             if info.get("success") and info.get("data", {}).get("name"):
                 name = info["data"]["name"]
                 if info["data"].get("type", "game") in ("game", "dlc", "application", "demo"):
-                    cache[key] = {"app_id": app_id, "name": name}
+                    cache[key] = {"app_id": app_id, "name": name, "source": "appdetails"}
                     save_steam_cache(cache)
-                    logger.info(f"Steam Depot {depot_id} -> App {app_id}: {name}")
+                    logger.info(f"Steam Depot {depot_id} -> App {app_id}: {name} [appdetails]")
                     return app_id, name
         except Exception:
             pass
         time.sleep(0.3)
+
     cache[key] = {"app_id": depot_id, "name": f"Depot {depot_id}"}
     save_steam_cache(cache)
     return depot_id, f"Depot {depot_id}"
@@ -86,14 +168,11 @@ def resolve_steam_app(depot_id, cache):
 # ── URL-Parser je CDN ─────────────────────────────────────────────────────────
 def extract_game_info(r):
     """
-    Gibt (cdn, game_id, display_hint) zurueck oder None.
+    Gibt (cdn, game_id, name_hint) zurueck oder None.
 
     Steam:      /depot/{depot_id}/chunk/...
     Epic:       /Builds/Org/{org_id}/{manifest_id}/...
     Blizzard:   /tpr/{game_code}/data/...
-    WSUS:       /filestreamingservice/files/{uuid}
-                /msdownload/update/...
-                /v11/...
     """
     cdn = r.get("cdn", "")
     url = r.get("url", "")
@@ -101,29 +180,22 @@ def extract_game_info(r):
     if cdn == "steam":
         m = re.search(r"/depot/(\d+)/", url)
         if m:
-            return "steam", int(m.group(1)), None
+            depot_id = int(m.group(1))
+            return "steam", depot_id, None
 
     elif cdn == "epicgames":
         m = re.search(r"/Builds/Org/([^/]+)/([^/]+)/", url)
         if m:
-            return "epicgames", m.group(1), m.group(2)
+            org_id      = m.group(1)   # z.B. o-37m6jbj5wcvrcvm4wusv7nazdfvbjk
+            manifest_id = m.group(2)   # z.B. fbb7b5df655a4b07ad280fec947d0d9f
+            # game_id = org_id (stabil je Publisher/Spiel)
+            return "epicgames", org_id, manifest_id
 
     elif cdn == "blizzard":
         m = re.search(r"/tpr/([^/]+)/", url)
         if m:
-            return "blizzard", m.group(1).lower(), None
-
-    elif cdn == "wsus":
-        # Variante 1: /filestreamingservice/files/{uuid}
-        m = re.search(r"/filestreamingservice/files/([0-9a-f-]{36})", url, re.IGNORECASE)
-        if m:
-            return "wsus", m.group(1).lower(), None
-        # Variante 2: /msdownload/update/software/.../{filename}
-        m = re.search(r"/(?:msdownload|v11|update)/.*?/([^/?]+\.(?:cab|exe|msu|msp|psf))", url, re.IGNORECASE)
-        if m:
-            return "wsus", m.group(1).lower(), None
-        # Fallback: gesamten WSUS-Traffic als eine Gruppe
-        return "wsus", "__wsus__", None
+            game_code = m.group(1).lower()
+            return "blizzard", game_code, game_code
 
     return None
 
@@ -134,16 +206,16 @@ class LanCacheMonitor:
         self.log_path = os.getenv("LOG_PATH", "/data/logs/access.log")
         self.registry = CollectorRegistry()
 
-        self.requests_total     = Counter("lancache_requests_total",    "Total requests",     ["status", "method", "cdn"], registry=self.registry)
-        self.bytes_total        = Counter("lancache_bytes_total",        "Total bytes",        ["cdn", "hit_status"],       registry=self.registry)
-        self.cache_hits         = Counter("lancache_cache_hits_total",   "Cache hits",         ["cdn"],                    registry=self.registry)
-        self.cache_misses       = Counter("lancache_cache_misses_total", "Cache misses",       ["cdn"],                    registry=self.registry)
-        self.hit_rate           = Gauge("lancache_hit_rate",             "Hit rate (0-1)",                                registry=self.registry)
-        self.hit_rate_by_cdn    = Gauge("lancache_hit_rate_by_cdn",      "Hit rate by CDN",   ["cdn"],                    registry=self.registry)
-        self.active_connections = Gauge("lancache_active_connections",   "Active connections",                            registry=self.registry)
-        self.cache_size_bytes   = Gauge("lancache_cache_size_bytes",     "Cache size bytes",                              registry=self.registry)
-        self.bytes_served_total = Gauge("lancache_bytes_served_total",   "Total bytes served",                            registry=self.registry)
-        self.uptime_seconds     = Gauge("lancache_uptime_seconds",       "Uptime seconds",                               registry=self.registry)
+        self.requests_total     = Counter("lancache_requests_total",     "Total requests",     ["status", "method", "cdn"], registry=self.registry)
+        self.bytes_total        = Counter("lancache_bytes_total",         "Total bytes",        ["cdn", "hit_status"],       registry=self.registry)
+        self.cache_hits         = Counter("lancache_cache_hits_total",    "Cache hits",         ["cdn"],                    registry=self.registry)
+        self.cache_misses       = Counter("lancache_cache_misses_total",  "Cache misses",       ["cdn"],                    registry=self.registry)
+        self.hit_rate           = Gauge("lancache_hit_rate",              "Hit rate (0-1)",                                registry=self.registry)
+        self.hit_rate_by_cdn    = Gauge("lancache_hit_rate_by_cdn",       "Hit rate by CDN",   ["cdn"],                    registry=self.registry)
+        self.active_connections = Gauge("lancache_active_connections",    "Active connections",                            registry=self.registry)
+        self.cache_size_bytes   = Gauge("lancache_cache_size_bytes",      "Cache size bytes",                              registry=self.registry)
+        self.bytes_served_total = Gauge("lancache_bytes_served_total",    "Total bytes served",                            registry=self.registry)
+        self.uptime_seconds     = Gauge("lancache_uptime_seconds",        "Uptime seconds",                               registry=self.registry)
 
         self.start_time      = time.time()
         self.total_requests  = self.total_hits = self.total_bytes_served = 0
@@ -153,9 +225,14 @@ class LanCacheMonitor:
         # game_stats[(cdn, game_id)] = {bytes_hit, bytes_miss, hits, misses}
         self.game_stats = defaultdict(lambda: {"bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0})
 
+        # Steam Cache: depot_XYZ -> {app_id, name}
         self.steam_cache        = load_steam_cache()
-        self.name_resolve_queue = set()
-        self.lock               = threading.Lock()
+        self.name_resolve_queue = set()   # Steam-Depot-IDs die noch aufgeloest werden muessen
+
+        # Epic Cache: org_id -> name (persistent in steam_cache unter key epic_ORG)
+        # Blizzard: aus BLIZZARD_GAMES dict
+
+        self.lock = threading.Lock()
 
         for g in [self.hit_rate, self.active_connections, self.cache_size_bytes, self.bytes_served_total]:
             g.set(0)
@@ -229,6 +306,7 @@ class LanCacheMonitor:
 
         self.recent_requests.append({"timestamp": datetime.now(), "cdn": cdn, "bytes": b, "hit_status": hs})
 
+        # Game-Tracking
         info = extract_game_info(r)
         if info:
             cdn_key, game_id, _ = info
@@ -240,36 +318,34 @@ class LanCacheMonitor:
                 else:
                     self.game_stats[key]["bytes_miss"] += b
                     self.game_stats[key]["misses"]     += 1
+                # Steam-Namen noch nicht bekannt? -> Queue
                 if cdn_key == "steam" and f"depot_{game_id}" not in self.steam_cache:
                     self.name_resolve_queue.add(game_id)
 
     # ── Name-Aufloesung ───────────────────────────────────────────────────────
 
     def resolve_name(self, cdn, game_id):
+        """Gibt den Anzeigenamen fuer ein Spiel zurueck."""
         if cdn == "steam":
-            key   = f"depot_{game_id}"
+            key = f"depot_{game_id}"
             entry = self.steam_cache.get(key, {})
             return entry.get("app_id", game_id), entry.get("name", f"Depot {game_id}")
 
         elif cdn == "blizzard":
-            return game_id, BLIZZARD_GAMES.get(str(game_id), f"Blizzard: {game_id}")
-
-        elif cdn == "epicgames":
-            short = str(game_id)[:14] if len(str(game_id)) > 14 else str(game_id)
-            key   = f"epic_{game_id}"
-            name  = self.steam_cache.get(key, {}).get("name", f"Epic: {short}")
+            name = BLIZZARD_GAMES.get(str(game_id), f"Blizzard: {game_id}")
             return game_id, name
 
-        elif cdn == "wsus":
-            if game_id == "__wsus__":
-                return game_id, "Windows Update"
-            # UUID kuerzen: ab8250bc-8011-... -> ab8250bc
-            short = str(game_id)[:8]
-            return game_id, f"Windows Update ({short}...)"
+        elif cdn == "epicgames":
+            # Org-ID kuerzen fuer Anzeige: o-37m6jbj5w... -> o-37m6jbj5w
+            short = str(game_id)[:12] if len(str(game_id)) > 12 else str(game_id)
+            key = f"epic_{game_id}"
+            name = self.steam_cache.get(key, {}).get("name", f"Epic: {short}")
+            return game_id, name
 
         return game_id, str(game_id)
 
     def resolve_names_worker(self):
+        """Loest Steam Depot-IDs im Hintergrund auf."""
         while True:
             try:
                 with self.lock:
@@ -323,16 +399,17 @@ class LanCacheMonitor:
                 logger.error(f"Fehler beim Aktualisieren: {e}")
             time.sleep(30)
 
-    # ── Spiele-Liste ──────────────────────────────────────────────────────────
+    # ── Spiele-Liste (gruppiert) ──────────────────────────────────────────────
 
     def get_games_list(self, cdn_filter=None, limit=1000):
+        """
+        Gibt alle Spiele gruppiert zurueck.
+        Steam-Depots werden nach App-ID zusammengefasst.
+        Optional: cdn_filter='steam'|'epicgames'|'blizzard'
+        """
         with self.lock:
-            # Steam: Depots nach App-ID gruppieren
-            steam_groups = {}
-            # WSUS: alle Dateien zu einer Zeile zusammenfassen (optional)
-            wsus_total   = {"cdn": "wsus", "app_id": "__wsus_total__", "name": "Windows Update (gesamt)",
-                            "depots": [], "bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0}
-            wsus_files   = []
+            # Steam: erst Depots nach App-ID gruppieren
+            steam_groups = {}   # app_id -> {name, depots, bytes_hit, ...}
             other_games  = []
 
             for (cdn, game_id), stats in self.game_stats.items():
@@ -351,23 +428,6 @@ class LanCacheMonitor:
                     steam_groups[app_id]["bytes_miss"] += stats["bytes_miss"]
                     steam_groups[app_id]["hits"]       += stats["hits"]
                     steam_groups[app_id]["misses"]     += stats["misses"]
-
-                elif cdn == "wsus":
-                    # Gesamtsumme
-                    wsus_total["bytes_hit"]  += stats["bytes_hit"]
-                    wsus_total["bytes_miss"] += stats["bytes_miss"]
-                    wsus_total["hits"]       += stats["hits"]
-                    wsus_total["misses"]     += stats["misses"]
-                    # Einzelne Datei (UUID / Dateiname)
-                    if game_id != "__wsus__":
-                        _, name = self.resolve_name(cdn, game_id)
-                        wsus_files.append({
-                            "cdn": "wsus", "app_id": game_id, "name": name,
-                            "depots": [], "bytes_hit": stats["bytes_hit"],
-                            "bytes_miss": stats["bytes_miss"],
-                            "hits": stats["hits"], "misses": stats["misses"],
-                        })
-
                 else:
                     _, name = self.resolve_name(cdn, game_id)
                     other_games.append({
@@ -377,19 +437,14 @@ class LanCacheMonitor:
                         "hits": stats["hits"], "misses": stats["misses"],
                     })
 
-            # WSUS-Gesamtzeile nur wenn tatsaechlich Daten vorhanden
-            wsus_entries = []
-            if wsus_total["bytes_hit"] + wsus_total["bytes_miss"] > 0:
-                wsus_entries = [wsus_total] + sorted(wsus_files, key=lambda x: x["bytes_hit"], reverse=True)
-
-            result = list(steam_groups.values()) + other_games + wsus_entries
+            result = list(steam_groups.values()) + other_games
 
             for g in result:
                 total = g["hits"] + g["misses"]
-                g["bytes_total"] = g["bytes_hit"] + g["bytes_miss"]
-                g["hit_rate"]    = round(g["hits"] / max(total, 1) * 100, 1)
-                g["depot_count"] = len(g["depots"])
-                g["depots"]      = sorted(g["depots"]) if g["depots"] else []
+                g["bytes_total"]  = g["bytes_hit"] + g["bytes_miss"]
+                g["hit_rate"]     = round(g["hits"] / max(total, 1) * 100, 1)
+                g["depot_count"]  = len(g["depots"])
+                g["depots"]       = sorted(g["depots"]) if g["depots"] else []
 
             result.sort(key=lambda x: x["bytes_hit"], reverse=True)
             return result[:limit]
@@ -402,7 +457,7 @@ class LanCacheMonitor:
 
         class MetricsHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                path   = self.path.split("?")[0]
+                path = self.path.split("?")[0]
                 params = {}
                 if "?" in self.path:
                     for p in self.path.split("?")[1].split("&"):
@@ -420,10 +475,10 @@ class LanCacheMonitor:
                     self.wfile.write(out)
 
                 elif path == "/depots":
-                    limit = int(params.get("limit", 1000))
-                    cdn_f = params.get("cdn", None)
-                    data  = monitor.get_games_list(cdn_filter=cdn_f, limit=limit)
-                    out   = json.dumps(data, ensure_ascii=False).encode()
+                    limit  = int(params.get("limit", 1000))
+                    cdn_f  = params.get("cdn", None)
+                    data   = monitor.get_games_list(cdn_filter=cdn_f, limit=limit)
+                    out    = json.dumps(data, ensure_ascii=False).encode()
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Access-Control-Allow-Origin", "*")
@@ -450,7 +505,7 @@ class LanCacheMonitor:
     def run(self):
         handler = self.create_http_handler()
         httpd   = HTTPServer(("0.0.0.0", self.port), handler)
-        for target in [self.monitor_logs, self.update_stats, self.resolve_names_worker]:
+        for target in [self.monitor_logs, self.update_stats, self.resolve_names_worker, applist_refresh_worker]:
             threading.Thread(target=target, daemon=True).start()
         logger.info(f"HTTP Server gestartet auf Port {self.port}")
         httpd.serve_forever()
