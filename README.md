@@ -44,6 +44,15 @@ After installation the following URLs are available:
 | `http://LANCACHE_IP:9114/depots` | JSON: Steam depot statistics grouped by game |
 | `http://LANCACHE_IP:9114/health` | Health check endpoint |
 
+# Architecture
+
+Data flows in one direction through the stack:
+
+1. **`dns`** answers DNS queries for known CDN hostnames (Steam, Epic, Battle.net, …) with `LANCACHE_IP`, so clients connect to the cache instead of the real CDN.
+2. **`monolithic`** serves and caches the actual downloads and writes an nginx access log to `${CACHE_ROOT}/logs/access.log`.
+3. **`log-monitor`** tails that log read-only, parses every request (CDN, URL, bytes, hit/miss) and exposes the results as Prometheus metrics (`/metrics`) and as a JSON games list (`/depots`). Steam depot IDs are resolved to game names in background threads.
+4. **`web-stats`** is a static dashboard. Your **browser** fetches the data directly from `http://LANCACHE_IP:9114/depots` — the dashboard container itself never talks to the monitor. Port 9114 must therefore be reachable from client machines.
+
 # Settings
 
 > You **MUST** set at least `LANCACHE_IP` and `DNS_BIND_IP`. It is highly recommended that you set `CACHE_ROOT` to a folder of your choosing and configure `CACHE_DISK_SIZE` to match your available storage.
@@ -135,11 +144,24 @@ Number of days access logs are kept.
 
 > **Note:** defaults to `30`.
 
+## `STEAM_API_KEY` (optional)
+
+API key for the Steam Web API (get one at https://steamcommunity.com/dev/apikey). When set, the `log-monitor` downloads the full Steam app list once every 2 hours and resolves depot IDs to game names instantly via local lookup.
+
+Without a key the monitor falls back to the public `appdetails` store API, which is heavily rate-limited — names will appear slowly, one app at a time.
+
+Add the key to your `.env`:
+
+```
+STEAM_API_KEY=YOUR_KEY_HERE
+```
+
 # Steam Game Tracking
 
 The `log-monitor` service automatically detects Steam downloads by matching the URL pattern `/depot/{ID}/chunk/...` in the nginx access logs.
 
-- Depot IDs are resolved to game names in the background via the Steam API (rate-limited, cached in `/tmp/steam_names.json` inside the container)
+- Depot IDs are resolved to game names in the background. Resolution order: local name cache → Steam app list (requires `STEAM_API_KEY`, see Settings) → public `appdetails` API as rate-limited fallback. Unresolvable depots are shown as `Depot XXXXX` and retried after 2 hours.
+- Resolved names are cached in `/data/cache/steam_names.json` inside the container. Mount a volume to that path if you want the name cache to survive container restarts.
 - Multiple depots belonging to the same game (base game, DLCs, language packs) are automatically grouped together
 - The web dashboard at `:8080` shows a top games table sorted by bytes served from cache
 - The raw data is available as JSON at `http://LANCACHE_IP:9114/depots`
@@ -219,8 +241,8 @@ mkdir -p /mnt/SSD/docker/lancache/logs
 |---|---|
 | `unable to evaluate symlinks in Dockerfile path` | Old `docker-compose.yml` with `build:` section — download the current file from the repo |
 | `bind mount failed: path does not exist` | Create `$CACHE_ROOT/cache` and `$CACHE_ROOT/logs` manually before starting |
-| Web dashboard shows "Monitor not reachable" | Bind port 9114 to `0.0.0.0` instead of `127.0.0.1` in `docker-compose.yml` |
-| Steam game names not resolved | The `log-monitor` container requires internet access to reach the Steam API |
+| Web dashboard shows "Monitor not reachable" | The browser fetches data directly from `http://LANCACHE_IP:9114` — make sure that port is reachable from the client (firewall, correct `LANCACHE_IP` in `.env`) |
+| Steam game names not resolved / only `Depot XXXXX` | The `log-monitor` container needs internet access to the Steam API. Set `STEAM_API_KEY` in `.env` for fast bulk resolution |
 | Grafana empty after start | Wait a few minutes — provisioning runs on the first startup |
 
 # More Information
