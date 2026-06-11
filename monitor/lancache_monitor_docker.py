@@ -251,7 +251,6 @@ class LanCacheMonitor:
         self.hit_rate           = Gauge("lancache_hit_rate",             "Hit rate (0-1)",                                 registry=self.registry)
         self.hit_rate_by_cdn    = Gauge("lancache_hit_rate_by_cdn",      "Hit rate by CDN",    ["cdn"],                    registry=self.registry)
         self.active_connections = Gauge("lancache_active_connections",   "Active connections",                             registry=self.registry)
-        self.cache_size_bytes   = Gauge("lancache_cache_size_bytes",     "Cache size bytes",                               registry=self.registry)
         self.bytes_served_total = Gauge("lancache_bytes_served_total",   "Total bytes served",                             registry=self.registry)
         self.uptime_seconds     = Gauge("lancache_uptime_seconds",       "Uptime seconds",                                 registry=self.registry)
 
@@ -265,7 +264,7 @@ class LanCacheMonitor:
         self.name_resolve_queue = set()
         self.lock               = threading.Lock()
 
-        for g in [self.hit_rate, self.active_connections, self.cache_size_bytes, self.bytes_served_total]:
+        for g in [self.hit_rate, self.active_connections, self.bytes_served_total]:
             g.set(0)
 
         logger.info(f"LanCache Monitor gestartet auf Port {self.port}")
@@ -432,10 +431,9 @@ class LanCacheMonitor:
             try:
                 self.uptime_seconds.set(time.time() - self.start_time)
                 cutoff = datetime.now()
-                recent = sum(1 for r in self.recent_requests if (cutoff - r["timestamp"]).seconds < 60)
+                recent = sum(1 for r in self.recent_requests if (cutoff - r["timestamp"]).total_seconds() < 60)
                 self.active_connections.set(recent)
                 tb = int(self.total_bytes_served)
-                self.cache_size_bytes.set(tb)
                 self.bytes_served_total.set(tb)
                 logger.info(
                     f"Stats - Requests: {self.total_requests}, Hits: {self.total_hits}, "
