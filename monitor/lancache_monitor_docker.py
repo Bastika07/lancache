@@ -42,6 +42,15 @@ BLIZZARD_GAMES = {
     "wlby":        "Crash Bandicoot 4",
     "zeus":        "Call of Duty: Black Ops Cold War",
     "rtro":        "Blizzard Arcade Collection",
+    "anbs":        "Battle.net Bootstrapper",
+}
+
+# ── Epic Artefakt-Codename → Name ────────────────────────────────────────────
+# Manche Epic-URLs enthalten statt der Catalog-Item-ID (32 Hex) einen
+# Artefakt-Codenamen; der ist ohne Auth nicht aufloesbar → Builtin-Mapping
+EPIC_CODENAMES = {
+    "Fortnite": "Fortnite",
+    "Sugar":    "Rocket League",
 }
 
 
@@ -386,7 +395,12 @@ class LanCacheMonitor:
                 else:
                     self.game_stats[key]["bytes_miss"] += b
                     self.game_stats[key]["misses"]     += 1
-                if cdn_key in ("steam", "epicgames"):
+                # Nur aufloesen, was eine API kennt: Steam-Depots und
+                # Epic-Catalog-Item-IDs (32 Hex); Epic-Codenamen sind selbst lesbar
+                resolvable = cdn_key == "steam" or (
+                    cdn_key == "epicgames" and re.fullmatch(r"[0-9a-f]{32}", str(game_id))
+                )
+                if resolvable:
                     cache_key = f"depot_{game_id}" if cdn_key == "steam" else f"epic_{game_id}"
                     entry = self.steam_cache.get(cache_key, {})
                     if cache_key not in self.steam_cache or (
@@ -410,7 +424,10 @@ class LanCacheMonitor:
             name = BLIZZARD_GAMES.get(str(game_id), f"Blizzard: {game_id}")
             return game_id, name, "builtin" if str(game_id) in BLIZZARD_GAMES else "unknown"
         elif cdn == "epicgames":
-            short = str(game_id)[:14] if len(str(game_id)) > 14 else str(game_id)
+            gid = str(game_id)
+            if gid in EPIC_CODENAMES:
+                return game_id, EPIC_CODENAMES[gid], "builtin"
+            short = gid[:14] if len(gid) > 14 else gid
             key   = f"epic_{game_id}"
             entry = self.steam_cache.get(key, {})
             return game_id, entry.get("name", f"Epic: {short}"), entry.get("source", "unknown")
