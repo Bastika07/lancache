@@ -44,6 +44,8 @@ Depot IDs from log URLs are resolved to game names in background threads, never 
 - Unresolvable depots are cached as `source: "unknown"` and retried after `RETRY_UNKNOWN_TTL`.
 - Caches live in `CACHE_DIR` (default `/data/cache`), mounted from `${CACHE_ROOT}/monitor-cache` in docker-compose.yml so they survive container restarts.
 
+Epic catalog item IDs (second path component of `/Builds/Org/{org}/{item}/`) are resolved via the third-party egdata.app API in `resolve_epic_item()`; Blizzard codes come from the static `BLIZZARD_GAMES` table. All resolved names share one cache file (`steam_names.json`, keys `depot_*`/`epic_*`), saved once per resolver batch.
+
 Multiple depots resolving to the same app_id are merged into one entry in `get_games_list()`; WSUS requests are aggregated into a single "Windows Update (gesamt)" row plus per-file rows.
 
 ### Compose / installer split

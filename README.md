@@ -163,6 +163,7 @@ The `log-monitor` service automatically detects Steam downloads by matching the 
 - Depot IDs are resolved to game names in the background. Resolution order: local name cache → Steam app list (requires `STEAM_API_KEY`, see Settings) → public `appdetails` API as rate-limited fallback. Unresolvable depots are shown as `Depot XXXXX` and retried after 2 hours.
 - Resolved names are cached in `${CACHE_ROOT}/monitor-cache/steam_names.json` (mounted to `/data/cache` inside the container), so the name cache survives container restarts.
 - Multiple depots belonging to the same game (base game, DLCs, language packs) are automatically grouped together
+- Epic Games downloads are resolved to game names via the community API [egdata.app](https://egdata.app); Blizzard games via a built-in code table
 - The web dashboard at `:8080` shows a top games table sorted by bytes served from cache
 - The raw data is available as JSON at `http://LANCACHE_IP:9114/depots`
 

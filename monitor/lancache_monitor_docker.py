@@ -2,7 +2,7 @@
 import os, time, threading, re, json
 from collections import deque, defaultdict
 from datetime import datetime
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from prometheus_client import Counter, Gauge, CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest
 import logging
@@ -171,7 +171,6 @@ def resolve_steam_app(depot_id, cache):
             name = applist.get(str(app_id))
             if name:
                 cache[key] = {"app_id": app_id, "name": name, "source": "applist", "_fetched": now}
-                save_steam_cache(cache)
                 logger.info(f"Steam Depot {depot_id} → App {app_id}: {name} [AppList]")
                 return app_id, name
 
@@ -188,7 +187,6 @@ def resolve_steam_app(depot_id, cache):
                 name = info["data"]["name"]
                 if info["data"].get("type", "game") in ("game", "dlc", "application", "demo"):
                     cache[key] = {"app_id": app_id, "name": name, "source": "appdetails", "_fetched": now}
-                    save_steam_cache(cache)
                     logger.info(f"Steam Depot {depot_id} → App {app_id}: {name} [appdetails]")
                     return app_id, name
         except Exception:
@@ -201,9 +199,45 @@ def resolve_steam_app(depot_id, cache):
         "source": "unknown", "_fetched": now,
         "_retry_after": now + RETRY_UNKNOWN_TTL,
     }
-    save_steam_cache(cache)
     logger.warning(f"Steam Depot {depot_id}: nicht aufloesbar, retry in {RETRY_UNKNOWN_TTL/3600:.0f}h")
     return depot_id, f"Depot {depot_id}"
+
+
+# ── Epic Catalog-Item → Name Resolver (via egdata.app) ──────────────────────
+EGDATA_ITEM_URL = "https://api.egdata.app/items/{}"
+
+
+def resolve_epic_item(item_id, cache):
+    key = f"epic_{item_id}"
+    now = time.time()
+
+    if key in cache:
+        entry = cache[key]
+        if entry.get("source") != "unknown" or now < entry.get("_retry_after", 0):
+            return entry.get("name", f"Epic: {str(item_id)[:14]}")
+        del cache[key]
+
+    try:
+        # egdata blockt den Standard-Python-User-Agent (403)
+        req = Request(EGDATA_ITEM_URL.format(item_id),
+                      headers={"User-Agent": "lancache-monitor (+https://github.com/Bastika07/lancache)"})
+        with urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        title = data.get("title")
+        if title:
+            cache[key] = {"app_id": item_id, "name": title, "source": "egdata", "_fetched": now}
+            logger.info(f"Epic Item {item_id} → {title} [egdata]")
+            return title
+    except Exception as e:
+        logger.warning(f"Epic Item {item_id}: Abruf fehlgeschlagen: {e}")
+
+    cache[key] = {
+        "app_id": item_id, "name": f"Epic: {str(item_id)[:14]}",
+        "source": "unknown", "_fetched": now,
+        "_retry_after": now + RETRY_UNKNOWN_TTL,
+    }
+    logger.warning(f"Epic Item {item_id}: nicht aufloesbar, retry in {RETRY_UNKNOWN_TTL/3600:.0f}h")
+    return cache[key]["name"]
 
 
 # ── URL-Parser je CDN ─────────────────────────────────────────────────────────
@@ -217,9 +251,11 @@ def extract_game_info(r):
             return "steam", int(m.group(1)), None
 
     elif cdn == "epicgames":
+        # Zweite Komponente ist die Catalog-Item-ID (identifiziert das Spiel),
+        # erste nur die Org des Publishers
         m = re.search(r"/Builds/Org/([^/]+)/([^/]+)/", url)
         if m:
-            return "epicgames", m.group(1), m.group(2)
+            return "epicgames", m.group(2), m.group(1)
 
     elif cdn == "blizzard":
         m = re.search(r"/tpr/([^/]+)/", url)
@@ -350,14 +386,14 @@ class LanCacheMonitor:
                 else:
                     self.game_stats[key]["bytes_miss"] += b
                     self.game_stats[key]["misses"]     += 1
-                if cdn_key == "steam":
-                    cache_key = f"depot_{game_id}"
+                if cdn_key in ("steam", "epicgames"):
+                    cache_key = f"depot_{game_id}" if cdn_key == "steam" else f"epic_{game_id}"
                     entry = self.steam_cache.get(cache_key, {})
                     if cache_key not in self.steam_cache or (
                         entry.get("source") == "unknown" and
                         time.time() >= entry.get("_retry_after", 0)
                     ):
-                        self.name_resolve_queue.add(game_id)
+                        self.name_resolve_queue.add((cdn_key, game_id))
 
     # ── Name-Aufloesung ───────────────────────────────────────────────────────
 
@@ -391,12 +427,19 @@ class LanCacheMonitor:
                 batch_size = 20 if applist_available else 5
                 with self.lock:
                     queue = list(self.name_resolve_queue)[:batch_size]
-                for depot_id in queue:
-                    resolve_steam_app(depot_id, self.steam_cache)
+                for cdn_key, item_id in queue:
+                    if cdn_key == "steam":
+                        resolve_steam_app(item_id, self.steam_cache)
+                        if not applist_available:
+                            time.sleep(1)
+                    elif cdn_key == "epicgames":
+                        resolve_epic_item(item_id, self.steam_cache)
+                        time.sleep(0.5)
                     with self.lock:
-                        self.name_resolve_queue.discard(depot_id)
-                    if not applist_available:
-                        time.sleep(1)
+                        self.name_resolve_queue.discard((cdn_key, item_id))
+                # Disk-Save einmal pro Batch statt pro Aufloesung
+                if queue:
+                    save_steam_cache(self.steam_cache)
             except Exception as e:
                 logger.error(f"Name-Resolver Fehler: {e}")
             time.sleep(5)
