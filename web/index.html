@@ -203,18 +203,20 @@ async function loadDepots() {
 
     document.getElementById('status-dot').className = 'status-dot';
 
-    // Summary-Karten – echte Werte aus ALLEN Depots
-    const totalHit  = allDepots.reduce((s, d) => s + d.bytes_hit,  0);
-    const totalMiss = allDepots.reduce((s, d) => s + d.bytes_miss, 0);
+    // Summary-Karten: WSUS-Einzeldateien sind bereits in
+    // "Windows Update (gesamt)" enthalten – nicht doppelt zaehlen
+    const summaryDepots = allDepots.filter(g => g.cdn !== 'wsus' || g.app_id === '__wsus_total__');
+    const totalHit  = summaryDepots.reduce((s, d) => s + d.bytes_hit,  0);
+    const totalMiss = summaryDepots.reduce((s, d) => s + d.bytes_miss, 0);
     const total     = totalHit + totalMiss;
 
     document.getElementById('hit-rate').textContent   = total > 0 ? (totalHit / total * 100).toFixed(1) + '%' : '0%';
     document.getElementById('bytes-hit').textContent  = fmtBytes(totalHit);
     document.getElementById('bytes-miss').textContent = fmtBytes(totalMiss);
-    document.getElementById('game-count').textContent = allDepots.length;
+    document.getElementById('game-count').textContent = summaryDepots.length;
     // Untertitel: Aufschlüsselung nach CDN
     const cdnCounts = {};
-    allDepots.forEach(g => { cdnCounts[g.cdn] = (cdnCounts[g.cdn] || 0) + 1; });
+    summaryDepots.forEach(g => { cdnCounts[g.cdn] = (cdnCounts[g.cdn] || 0) + 1; });
     const cdnParts = Object.entries(cdnCounts).map(([cdn, n]) => `${n} ${cdn}`).join(', ');
     document.getElementById('depot-count-sub').textContent = cdnParts || 'Einträge gesamt';
 
