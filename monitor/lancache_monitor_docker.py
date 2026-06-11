@@ -409,6 +409,10 @@ class LanCacheMonitor:
         while True:
             try:
                 if os.path.exists(self.log_path):
+                    # Logrotate/Truncate erkennen: Datei kleiner als letzte Position
+                    if os.path.getsize(self.log_path) < last_pos:
+                        logger.info("Log-Datei wurde rotiert/geleert – lese von vorn")
+                        last_pos = 0
                     with open(self.log_path, "r") as f:
                         f.seek(last_pos)
                         for line in f:
