@@ -35,13 +35,14 @@ services:
       - monolithic
     volumes:
       - ${CACHE_ROOT}/logs:/data/logs:ro
+      - ${CACHE_ROOT}/monitor-cache:/data/cache
     ports:
       - "9114:9114"
     environment:
       - LOG_PATH=/data/logs/access.log
       - PROMETHEUS_PORT=9114
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9114/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9114/health', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
