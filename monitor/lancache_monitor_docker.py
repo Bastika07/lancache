@@ -45,12 +45,11 @@ BLIZZARD_GAMES = {
     "anbs":        "Battle.net Bootstrapper",
 }
 
-# ── Epic Artefakt-Codename → Name ────────────────────────────────────────────
-# Manche Epic-URLs enthalten statt der Catalog-Item-ID (32 Hex) einen
-# Artefakt-Codenamen; der ist ohne Auth nicht aufloesbar → Builtin-Mapping
+# ── Epic Artefakt-Codename → Name (Offline-Fallback, spart API-Calls) ───────
 EPIC_CODENAMES = {
     "Fortnite": "Fortnite",
     "Sugar":    "Rocket League",
+    "Calluna":  "Control",
 }
 
 
@@ -212,8 +211,16 @@ def resolve_steam_app(depot_id, cache):
     return depot_id, f"Depot {depot_id}"
 
 
-# ── Epic Catalog-Item → Name Resolver (via egdata.app) ──────────────────────
-EGDATA_ITEM_URL = "https://api.egdata.app/items/{}"
+# ── Epic Artefakt → Name Resolver (via egdata.app) ──────────────────────────
+EGDATA_BASE = "https://api.egdata.app"
+
+
+def _egdata_get(path):
+    # egdata blockt den Standard-Python-User-Agent (403)
+    req = Request(EGDATA_BASE + path,
+                  headers={"User-Agent": "lancache-monitor (+https://github.com/Bastika07/lancache)"})
+    with urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
 
 
 def resolve_epic_item(item_id, cache):
@@ -226,26 +233,35 @@ def resolve_epic_item(item_id, cache):
             return entry.get("name", f"Epic: {str(item_id)[:14]}")
         del cache[key]
 
+    # 1. Artefakt-ID → Asset → Item (deckt Codenamen wie "Calluna" ab)
     try:
-        # egdata blockt den Standard-Python-User-Agent (403)
-        req = Request(EGDATA_ITEM_URL.format(item_id),
-                      headers={"User-Agent": "lancache-monitor (+https://github.com/Bastika07/lancache)"})
-        with urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        title = data.get("title")
+        asset = _egdata_get(f"/assets/{item_id}")
+        ref = asset.get("itemId")
+        if ref:
+            title = _egdata_get(f"/items/{ref}").get("title")
+            if title:
+                cache[key] = {"app_id": item_id, "name": title, "source": "egdata", "_fetched": now}
+                logger.info(f"Epic Artefakt {item_id} → {title} [egdata/asset]")
+                return title
+    except Exception:
+        pass
+
+    # 2. Direkt als Catalog-Item-ID versuchen
+    try:
+        title = _egdata_get(f"/items/{item_id}").get("title")
         if title:
             cache[key] = {"app_id": item_id, "name": title, "source": "egdata", "_fetched": now}
-            logger.info(f"Epic Item {item_id} → {title} [egdata]")
+            logger.info(f"Epic Item {item_id} → {title} [egdata/item]")
             return title
-    except Exception as e:
-        logger.warning(f"Epic Item {item_id}: Abruf fehlgeschlagen: {e}")
+    except Exception:
+        pass
 
     cache[key] = {
         "app_id": item_id, "name": f"Epic: {str(item_id)[:14]}",
         "source": "unknown", "_fetched": now,
         "_retry_after": now + RETRY_UNKNOWN_TTL,
     }
-    logger.warning(f"Epic Item {item_id}: nicht aufloesbar, retry in {RETRY_UNKNOWN_TTL/3600:.0f}h")
+    logger.warning(f"Epic Artefakt {item_id}: nicht aufloesbar, retry in {RETRY_UNKNOWN_TTL/3600:.0f}h")
     return cache[key]["name"]
 
 
@@ -395,10 +411,8 @@ class LanCacheMonitor:
                 else:
                     self.game_stats[key]["bytes_miss"] += b
                     self.game_stats[key]["misses"]     += 1
-                # Nur aufloesen, was eine API kennt: Steam-Depots und
-                # Epic-Catalog-Item-IDs (32 Hex); Epic-Codenamen sind selbst lesbar
                 resolvable = cdn_key == "steam" or (
-                    cdn_key == "epicgames" and re.fullmatch(r"[0-9a-f]{32}", str(game_id))
+                    cdn_key == "epicgames" and str(game_id) not in EPIC_CODENAMES
                 )
                 if resolvable:
                     cache_key = f"depot_{game_id}" if cdn_key == "steam" else f"epic_{game_id}"
