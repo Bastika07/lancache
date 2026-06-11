@@ -121,7 +121,7 @@ log_section "6/6 Dienste pruefen"
 
 sleep 8
 ALL_OK=true
-for svc in dns monolithic log-monitor prometheus grafana web-stats; do
+for svc in dns monolithic log-monitor web-stats; do
     STATUS=$(docker compose ps "$svc" --format "{{.State}}" 2>/dev/null || echo "unknown")
     if [[ "$STATUS" == "running" ]]; then
         log_ok "${svc}: running"
@@ -139,13 +139,9 @@ echo ""
 echo -e "  ${BOLD}Cache-Server IP:${RESET}  ${LANCACHE_IP}"
 echo -e "  ${BOLD}DNS setzen auf:${RESET}   ${LANCACHE_IP}"
 echo ""
-echo -e "  ${BOLD}Grafana:${RESET}          http://${LANCACHE_IP}:3000"
-echo -e "  ${BOLD}  Benutzer:${RESET}       admin"
-echo -e "  ${BOLD}  Passwort:${RESET}       ${GRAFANA_PASSWORD}"
-echo ""
-echo -e "  ${BOLD}Prometheus:${RESET}       http://localhost:9090"
-echo -e "  ${BOLD}Metriken:${RESET}         http://localhost:9114/metrics"
 echo -e "  ${BOLD}Web-Dashboard:${RESET}    http://${LANCACHE_IP}:8080"
+echo -e "  ${BOLD}Metriken:${RESET}         http://${LANCACHE_IP}:9114/metrics"
+echo -e "  ${BOLD}Spiele-JSON:${RESET}      http://${LANCACHE_IP}:9114/depots"
 echo ""
 echo -e "  ${BOLD}Konfiguration:${RESET}    ${INSTALL_DIR}/.env"
 echo -e "  ${BOLD}Update:${RESET}           sudo bash ${INSTALL_DIR}/update.sh"
