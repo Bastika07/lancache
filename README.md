@@ -144,6 +144,18 @@ Number of days access logs are kept.
 
 > **Note:** defaults to `30`.
 
+## `IGNORE_IPS` (optional)
+
+Client IPs whose requests are excluded from all statistics (comma or space separated). Useful when a prefill tool (e.g. [lancache-prefill](https://github.com/tpill90/steam-lancache-prefill)) runs on the cache server itself — its downloads would otherwise inflate the miss/download numbers.
+
+Find the IP the prefill appears as in `${CACHE_ROOT}/logs/access.log`, then set e.g.:
+
+```
+IGNORE_IPS=172.16.1.1
+```
+
+Since the monitor re-reads the whole access log on startup, the filter also applies retroactively to existing log entries after a container restart. Skipped requests are counted in the `lancache_ignored_requests_total` metric.
+
 ## `STEAM_API_KEY` (optional)
 
 API key for the Steam Web API (get one at https://steamcommunity.com/dev/apikey). When set, the `log-monitor` downloads the full Steam app list once every 2 hours and resolves depot IDs to game names instantly via local lookup.

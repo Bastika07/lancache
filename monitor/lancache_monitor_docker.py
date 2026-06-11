@@ -303,12 +303,18 @@ class LanCacheMonitor:
     def __init__(self):
         self.port     = int(os.getenv("PROMETHEUS_PORT", "9114"))
         self.log_path = os.getenv("LOG_PATH", "/data/logs/access.log")
+        # IPs, deren Requests nicht in die Statistik einfliessen (z.B. Prefill)
+        self.ignore_ips = {
+            ip.strip() for ip in os.getenv("IGNORE_IPS", "").replace(",", " ").split()
+            if ip.strip()
+        }
         self.registry = CollectorRegistry()
 
         self.requests_total     = Counter("lancache_requests_total",    "Total requests",     ["status", "method", "cdn"], registry=self.registry)
         self.bytes_total        = Counter("lancache_bytes_total",        "Total bytes",        ["cdn", "hit_status"],       registry=self.registry)
         self.cache_hits         = Counter("lancache_cache_hits_total",   "Cache hits",         ["cdn"],                    registry=self.registry)
         self.cache_misses       = Counter("lancache_cache_misses_total", "Cache misses",       ["cdn"],                    registry=self.registry)
+        self.ignored_requests   = Counter("lancache_ignored_requests_total", "Requests skipped via IGNORE_IPS",            registry=self.registry)
         self.hit_rate           = Gauge("lancache_hit_rate",             "Hit rate (0-1)",                                 registry=self.registry)
         self.hit_rate_by_cdn    = Gauge("lancache_hit_rate_by_cdn",      "Hit rate by CDN",    ["cdn"],                    registry=self.registry)
         self.active_connections = Gauge("lancache_active_connections",   "Active connections",                             registry=self.registry)
@@ -330,6 +336,8 @@ class LanCacheMonitor:
 
         logger.info(f"LanCache Monitor gestartet auf Port {self.port}")
         logger.info(f"Ueberwache Log: {self.log_path}")
+        if self.ignore_ips:
+            logger.info(f"Ignoriere IPs (Prefill): {', '.join(sorted(self.ignore_ips))}")
         logger.info(f"Cache-Verzeichnis: {CACHE_DIR}")
         logger.info(f"  steam_names.json : {STEAM_CACHE_FILE}")
         logger.info(f"  steam_applist.json: {STEAM_APPLIST_FILE}")
@@ -369,6 +377,9 @@ class LanCacheMonitor:
 
     def process_request(self, r):
         if not r:
+            return
+        if r.get("ip") in self.ignore_ips:
+            self.ignored_requests.inc()
             return
         self.total_requests += 1
         cdn, method, status = r.get("cdn", "unknown"), r.get("method", "GET"), str(r.get("status", 0))
