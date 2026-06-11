@@ -42,19 +42,18 @@ Depot IDs from log URLs are resolved to game names in background threads, never 
 - Resolution order: disk cache (`steam_names.json`) → Steam AppList lookup (depot ID and the 10 preceding IDs, since depot IDs are usually app_id + small offset) → per-app `appdetails` store API fallback (rate-limited).
 - The full AppList is only fetched if `STEAM_API_KEY` is set; it is refreshed every 2h (`STEAM_APPLIST_TTL`) by `applist_refresh_worker()`.
 - Unresolvable depots are cached as `source: "unknown"` and retried after `RETRY_UNKNOWN_TTL`.
-- Caches live in `CACHE_DIR` (default `/data/cache`) — persistence across container restarts requires that path to be a mounted volume.
+- Caches live in `CACHE_DIR` (default `/data/cache`), mounted from `${CACHE_ROOT}/monitor-cache` in docker-compose.yml so they survive container restarts.
 
 Multiple depots resolving to the same app_id are merged into one entry in `get_games_list()`; WSUS requests are aggregated into a single "Windows Update (gesamt)" row plus per-file rows.
 
 ### Compose / installer split
 
-- `docker-compose.yml` in the repo is the **slim** stack (dns, monolithic, log-monitor, web-stats — no Prometheus/Grafana). The `prometheus/` and `grafana/` directories exist to build the full-stack images and are still wired into CI, and `install.sh` still health-checks `prometheus`/`grafana` services. Keep these in sync when changing the service set.
+- `docker-compose.yml` in the repo is the **slim** stack (dns, monolithic, log-monitor, web-stats — no Prometheus/Grafana). The `prometheus/` and `grafana/` directories exist to build the full-stack images and are still wired into CI. Keep `install.sh`'s service check in sync when changing the service set.
 - `install.sh` downloads `docker-compose.yml` and generates `.env` from the **raw GitHub URLs on `master`** — changes to those files are live for new installs immediately on push.
 - The checked-in `.env` is the template users download; `LANCACHE_IP`/`DNS_BIND_IP` default to a placeholder (`10.0.39.1`) that users must change.
 
 ## Gotchas
 
 - `FILE_OVERVIEW.md` is outdated (references files like `Dockerfile.monitor`, `setup_monitoring.sh` that no longer exist) — don't treat it as a source of truth; README.md is current.
-- The README's claim that Steam names are cached in `/tmp/steam_names.json` is stale; the code uses `CACHE_DIR` (`/data/cache`).
 - `web/style.css` is copied into the image but `index.html` uses only inline styles.
 - Git history is mostly "Update <file>" commits made directly on `master`.
