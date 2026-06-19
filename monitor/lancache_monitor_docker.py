@@ -23,8 +23,8 @@ _IP_RE             = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
 _PF_START          = re.compile(r'Starting (.+)$')
 _PF_DL             = re.compile(r'Downloading ([\d.]+) (\w+) from (\d+) chunks')
 _PF_DONE           = re.compile(r'Finished in [\d.]+ - ([\d.]+) Mbit/s')
-HISTORY_INTERVAL   = int(os.getenv("HISTORY_INTERVAL", "300"))  # Sekunden pro Snapshot
-HISTORY_MAX        = 288  # 24h bei 5-min-Intervall
+HISTORY_INTERVAL   = int(os.getenv("HISTORY_INTERVAL", "60"))  # Sekunden pro Snapshot
+HISTORY_MAX        = 1440  # 24h bei 1-min-Intervall
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
