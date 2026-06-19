@@ -12,7 +12,7 @@
     header h1 { font-size: 1.4rem; font-weight: 700; color: #63b3ed; }
     header span { font-size: 0.85rem; color: #718096; }
     .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
     .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px; padding: 20px; }
     .card-label { font-size: 0.75rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
     .card-value { font-size: 1.8rem; font-weight: 700; color: #63b3ed; }
@@ -93,7 +93,7 @@
 
   <!-- Verlauf -->
   <div class="section" id="history-section" style="display:none;">
-    <h2>📈 Verlauf</h2>
+    <h2>📈 Verlauf <span style="font-size:0.75rem;font-weight:400;color:#718096;">(inkl. Prefill)</span></h2>
     <div id="chart-container"></div>
   </div>
 

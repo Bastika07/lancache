@@ -575,11 +575,11 @@ class LanCacheMonitor:
                 now = time.time()
                 if now >= self._next_snapshot:
                     self.history.append({
-                        "ts":         int(now),
-                        "bytes_hit":  self.total_bytes_hit,
-                        "bytes_miss": self.total_bytes_miss,
-                        "requests":   self.total_requests,
-                        "hits":       self.total_hits,
+                        "ts":               int(now),
+                        "bytes_hit":        self.total_bytes_hit  + self.prefill_bytes_hit,
+                        "bytes_miss":       self.total_bytes_miss + self.prefill_bytes_miss,
+                        "requests":         self.total_requests,
+                        "hits":             self.total_hits,
                     })
                     if len(self.history) > HISTORY_MAX:
                         self.history.pop(0)
