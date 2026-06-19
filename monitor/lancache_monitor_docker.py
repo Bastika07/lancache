@@ -19,6 +19,8 @@ STEAM_APPLIST_TTL  = 7200    # AppList alle 2h neu laden
 RETRY_UNKNOWN_TTL  = 7200    # "Depot XXXXX"-Eintraege nach 2h nochmal versuchen
 NGINX_CACHE_PATH   = os.getenv("NGINX_CACHE_PATH", "")
 _IP_RE             = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
+HISTORY_INTERVAL   = int(os.getenv("HISTORY_INTERVAL", "300"))  # Sekunden pro Snapshot
+HISTORY_MAX        = 288  # 24h bei 5-min-Intervall
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -337,6 +339,10 @@ class LanCacheMonitor:
         self.prefill_requests_hit  = 0
         self.recent_timestamps = deque()  # float-Timestamps der letzten 60s (kein maxlen)
         self.cdn_stats         = {}
+        self.total_bytes_hit   = 0
+        self.total_bytes_miss  = 0
+        self.history           = []
+        self._next_snapshot    = time.time() + HISTORY_INTERVAL
 
         self.game_stats         = defaultdict(lambda: {"bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0})
         self.steam_cache        = load_steam_cache()
@@ -427,6 +433,10 @@ class LanCacheMonitor:
             self.bytes_total.labels(cdn=cdn, hit_status=hs).inc(b)
             self.total_bytes_served += b
             self.cdn_stats[cdn]["bytes"] += b
+            if hs.upper() in ("HIT", "STALE"):
+                self.total_bytes_hit  += b
+            else:
+                self.total_bytes_miss += b
 
         self.cdn_stats[cdn]["requests"] += 1
         hit = self.is_cache_hit(r)
@@ -562,6 +572,18 @@ class LanCacheMonitor:
                     f"Hit Rate: {(self.total_hits / max(self.total_requests, 1)) * 100:.1f}%, "
                     f"Bytes: {tb / (1024**3):.1f} GB"
                 )
+                now = time.time()
+                if now >= self._next_snapshot:
+                    self.history.append({
+                        "ts":         int(now),
+                        "bytes_hit":  self.total_bytes_hit,
+                        "bytes_miss": self.total_bytes_miss,
+                        "requests":   self.total_requests,
+                        "hits":       self.total_hits,
+                    })
+                    if len(self.history) > HISTORY_MAX:
+                        self.history.pop(0)
+                    self._next_snapshot = now + HISTORY_INTERVAL
                 if NGINX_CACHE_PATH:
                     try:
                         st    = os.statvfs(NGINX_CACHE_PATH)
@@ -684,6 +706,16 @@ class LanCacheMonitor:
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(b"OK")
+
+                elif path == "/history":
+                    data = list(monitor.history)
+                    out  = json.dumps(data).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
 
                 elif path == "/stats":
                     disk = {}
