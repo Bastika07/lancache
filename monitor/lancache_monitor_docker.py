@@ -335,8 +335,8 @@ class LanCacheMonitor:
         self.prefill_bytes_hit     = 0
         self.prefill_requests_miss = 0
         self.prefill_requests_hit  = 0
-        self.recent_requests = deque(maxlen=1000)
-        self.cdn_stats       = {}
+        self.recent_timestamps = deque()  # float-Timestamps der letzten 60s (kein maxlen)
+        self.cdn_stats         = {}
 
         self.game_stats         = defaultdict(lambda: {"bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0})
         self.steam_cache        = load_steam_cache()
@@ -375,9 +375,17 @@ class LanCacheMonitor:
                 "status":     int(m.group(5)),
                 "bytes":      int(m.group(6)) if m.group(6).isdigit() else 0,
                 "hit_status": m.group(9),
+                "log_ts":     self._parse_log_ts(m.group(3)),
             }
         except (ValueError, IndexError):
             return None
+
+    @staticmethod
+    def _parse_log_ts(raw):
+        try:
+            return datetime.strptime(raw, "%d/%b/%Y:%H:%M:%S %z").timestamp()
+        except Exception:
+            return time.time()
 
     def is_cache_hit(self, r):
         s = r.get("hit_status", "").upper()
@@ -435,7 +443,9 @@ class LanCacheMonitor:
         if cr > 0:
             self.hit_rate_by_cdn.labels(cdn=cdn).set(self.cdn_stats[cdn]["hits"] / cr)
 
-        self.recent_requests.append({"timestamp": datetime.now(), "cdn": cdn, "bytes": b, "hit_status": hs})
+        log_ts = r.get("log_ts", 0)
+        if time.time() - log_ts < 300:  # nur Echtzeit-Eintraege, kein Log-Replay
+            self.recent_timestamps.append(log_ts)
 
         info = extract_game_info(r)
         if info:
@@ -541,9 +551,10 @@ class LanCacheMonitor:
         while True:
             try:
                 self.uptime_seconds.set(time.time() - self.start_time)
-                cutoff = datetime.now()
-                recent = sum(1 for r in self.recent_requests if (cutoff - r["timestamp"]).total_seconds() < 60)
-                self.active_connections.set(recent)
+                cutoff = time.time() - 60
+                while self.recent_timestamps and self.recent_timestamps[0] < cutoff:
+                    self.recent_timestamps.popleft()
+                self.active_connections.set(len(self.recent_timestamps))
                 tb = int(self.total_bytes_served)
                 self.bytes_served_total.set(tb)
                 logger.info(
