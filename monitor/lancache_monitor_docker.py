@@ -18,6 +18,7 @@ STEAM_APPLIST_FILE = os.path.join(CACHE_DIR, "steam_applist.json")
 STEAM_APPLIST_TTL  = 7200    # AppList alle 2h neu laden
 RETRY_UNKNOWN_TTL  = 7200    # "Depot XXXXX"-Eintraege nach 2h nochmal versuchen
 NGINX_CACHE_PATH   = os.getenv("NGINX_CACHE_PATH", "")
+_IP_RE             = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -389,6 +390,8 @@ class LanCacheMonitor:
     def process_request(self, r):
         if not r:
             return
+        if _IP_RE.match(r.get("cdn", "")):
+            return  # Heartbeat / interne SNI-Proxy-Anfragen
         if r.get("ip") in self.ignore_ips:
             self.ignored_requests.inc()
             b   = r.get("bytes", 0)
