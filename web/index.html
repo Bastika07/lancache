@@ -77,9 +77,9 @@
       <div class="card-sub" id="depot-count-sub">Einträge gesamt</div>
     </div>
     <div class="card" id="prefill-card" style="display:none;">
-      <div class="card-label">Prefill gecacht</div>
+      <div class="card-label">Prefill runtergeladen</div>
       <div class="card-value" id="prefill-miss">–</div>
-      <div class="card-sub" id="prefill-sub">neu im Cache</div>
+      <div class="card-sub" id="prefill-sub">neu vom Internet</div>
     </div>
     <div class="card" id="disk-card" style="display:none;">
       <div class="card-label">Cache-Größe</div>
@@ -265,7 +265,7 @@ async function loadStats() {
       if (total > 0) {
         const hitPct = (s.prefill.bytes_hit / total * 100).toFixed(0);
         document.getElementById('prefill-miss').textContent = fmtBytes(s.prefill.bytes_miss);
-        document.getElementById('prefill-sub').textContent = `neu gecacht · ${hitPct}% bereits vorhanden`;
+        document.getElementById('prefill-sub').textContent = `neu vom Internet · ${hitPct}% aus Cache`;
         document.getElementById('prefill-card').style.display = '';
       }
     }
