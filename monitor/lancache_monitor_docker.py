@@ -382,6 +382,12 @@ class LanCacheMonitor:
         self.cdn_stats           = {}
         self.total_bytes_hit     = 0
         self.total_bytes_miss    = 0
+        # Nur Live-Traffic (log_ts < 300s alt) für den Verlaufs-Chart –
+        # verhindert, dass Log-Replay beim Start das Diagramm verfälscht
+        self._hist_bytes_hit     = 0
+        self._hist_bytes_miss    = 0
+        self._hist_pf_hit        = 0
+        self._hist_pf_miss       = 0
         self.history             = []
         self._next_snapshot      = time.time() + HISTORY_INTERVAL
 
@@ -462,6 +468,11 @@ class LanCacheMonitor:
                 else:
                     self.prefill_bytes_miss    += b
                     self.prefill_requests_miss += 1
+                if time.time() - r.get("log_ts", 0) < 300:
+                    if hit:
+                        self._hist_pf_hit  += b
+                    else:
+                        self._hist_pf_miss += b
             return
         self.total_requests += 1
         cdn, method, status = r.get("cdn", "unknown"), r.get("method", "GET"), str(r.get("status", 0))
@@ -500,6 +511,10 @@ class LanCacheMonitor:
             self.recent_timestamps.append(log_ts)
             if b > 0:
                 self.recent_bytes.append((log_ts, b))
+                if hs.upper() in ("HIT", "STALE"):
+                    self._hist_bytes_hit  += b
+                else:
+                    self._hist_bytes_miss += b
 
         if int(r.get("status", 0)) >= 500:
             self.total_errors_5xx += 1
@@ -634,11 +649,11 @@ class LanCacheMonitor:
                 now = time.time()
                 if now >= self._next_snapshot:
                     self.history.append({
-                        "ts":               int(now),
-                        "bytes_hit":        self.total_bytes_hit  + self.prefill_bytes_hit,
-                        "bytes_miss":       self.total_bytes_miss + self.prefill_bytes_miss,
-                        "requests":         self.total_requests,
-                        "hits":             self.total_hits,
+                        "ts":         int(now),
+                        "bytes_hit":  self._hist_bytes_hit + self._hist_pf_hit,
+                        "bytes_miss": self._hist_bytes_miss + self._hist_pf_miss,
+                        "requests":   self.total_requests,
+                        "hits":       self.total_hits,
                     })
                     if len(self.history) > HISTORY_MAX:
                         self.history.pop(0)
