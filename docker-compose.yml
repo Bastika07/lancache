@@ -37,12 +37,16 @@ services:
       - ${CACHE_ROOT}/logs:/data/logs:ro
       - ${CACHE_ROOT}/monitor-cache:/data/cache
       - ${CACHE_ROOT}/cache:/data/nginx-cache:ro
+      # Optional: Prefill-App-Log einbinden (z.B. ich777/lancache-prefill)
+      # - /pfad/zu/prefill:/data/prefill-logs:ro
     ports:
       - "9114:9114"
     environment:
       - LOG_PATH=/data/logs/access.log
       - PROMETHEUS_PORT=9114
       - NGINX_CACHE_PATH=/data/nginx-cache
+      # Optional: Pfad zum Prefill-App-Log (leer lassen = Feature deaktiviert)
+      # - PREFILL_LOG_PATH=/data/prefill-logs/app.log
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9114/health', timeout=3)"]
       interval: 30s

@@ -18,11 +18,41 @@ STEAM_APPLIST_FILE = os.path.join(CACHE_DIR, "steam_applist.json")
 STEAM_APPLIST_TTL  = 7200    # AppList alle 2h neu laden
 RETRY_UNKNOWN_TTL  = 7200    # "Depot XXXXX"-Eintraege nach 2h nochmal versuchen
 NGINX_CACHE_PATH   = os.getenv("NGINX_CACHE_PATH", "")
+PREFILL_LOG_PATH   = os.getenv("PREFILL_LOG_PATH", "")
 _IP_RE             = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
+_PF_START          = re.compile(r'Starting (.+)$')
+_PF_DL             = re.compile(r'Downloading ([\d.]+) (\w+) from (\d+) chunks')
+_PF_DONE           = re.compile(r'Finished in [\d.]+ - ([\d.]+) Mbit/s')
 HISTORY_INTERVAL   = int(os.getenv("HISTORY_INTERVAL", "300"))  # Sekunden pro Snapshot
 HISTORY_MAX        = 288  # 24h bei 5-min-Intervall
 
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+def _tail_lines(path, n_bytes=16384):
+    with open(path, 'rb') as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(-min(size, n_bytes), 2)
+        return f.read().decode('utf-8', errors='replace').splitlines()
+
+
+def _parse_prefill_log(lines):
+    game = size_str = speed = None
+    active = False
+    for line in lines:
+        m = _PF_START.search(line)
+        if m:
+            game, size_str, active = m.group(1).strip(), None, True
+            continue
+        m = _PF_DL.search(line)
+        if m and active:
+            size_str = f"{m.group(1)} {m.group(2)}"
+            continue
+        m = _PF_DONE.search(line)
+        if m:
+            speed, active = f"{m.group(1)} Mbit/s", False
+    return {"game": game or "", "size": size_str or "", "speed": speed or "", "active": active}
 
 # ── Blizzard Game-Code → Name ─────────────────────────────────────────────────
 BLIZZARD_GAMES = {
@@ -348,6 +378,7 @@ class LanCacheMonitor:
         self.steam_cache        = load_steam_cache()
         self.name_resolve_queue = set()
         self.lock               = threading.Lock()
+        self.prefill_status     = {}
 
         for g in [self.hit_rate, self.active_connections, self.bytes_served_total]:
             g.set(0)
@@ -594,6 +625,11 @@ class LanCacheMonitor:
                         self.disk_total_gauge.set(total)
                     except Exception as de:
                         logger.warning(f"Disk-Stats nicht lesbar ({NGINX_CACHE_PATH}): {de}")
+                if PREFILL_LOG_PATH:
+                    try:
+                        self.prefill_status = _parse_prefill_log(_tail_lines(PREFILL_LOG_PATH))
+                    except Exception as pe:
+                        logger.warning(f"Prefill-Log nicht lesbar ({PREFILL_LOG_PATH}): {pe}")
             except Exception as e:
                 logger.error(f"Fehler beim Aktualisieren: {e}")
             time.sleep(30)
@@ -735,6 +771,7 @@ class LanCacheMonitor:
                             "requests_hit":  monitor.prefill_requests_hit,
                         },
                         "disk": disk,
+                        "prefill_status": monitor.prefill_status,
                     }
                     out = json.dumps(data).encode()
                     self.send_response(200)

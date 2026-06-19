@@ -80,6 +80,7 @@
       <div class="card-label">Prefill runtergeladen</div>
       <div class="card-value" id="prefill-miss">–</div>
       <div class="card-sub" id="prefill-sub">neu vom Internet</div>
+      <div id="prefill-status-line" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #2d3748;font-size:0.75rem;line-height:1.5;"></div>
     </div>
     <div class="card" id="disk-card" style="display:none;">
       <div class="card-label">Cache-Größe</div>
@@ -355,6 +356,24 @@ async function loadStats() {
       bar.style.width = pct.toFixed(1) + '%';
       bar.style.background = pct > 90 ? '#fc8181' : pct > 75 ? '#f6c90e' : '#48bb78';
       document.getElementById('disk-card').style.display = '';
+    }
+
+    const ps  = s.prefill_status;
+    const psl = document.getElementById('prefill-status-line');
+    if (ps && ps.game && psl) {
+      let html = '';
+      if (ps.active) {
+        html = `<span style="color:#f6c90e;">⏳</span> <strong>${escHtml(ps.game)}</strong>`;
+        if (ps.size) html += `<br><span style="color:#718096;">${escHtml(ps.size)}</span>`;
+      } else if (ps.game) {
+        html = `<span style="color:#48bb78;">✓</span> ${escHtml(ps.game)}`;
+        if (ps.speed) html += `<br><span style="color:#718096;">${escHtml(ps.speed)}</span>`;
+      }
+      if (html) {
+        psl.innerHTML = html;
+        psl.style.display = '';
+        document.getElementById('prefill-card').style.display = '';
+      }
     }
   } catch (_) {}
 }
