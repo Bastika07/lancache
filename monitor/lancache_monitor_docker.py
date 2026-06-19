@@ -40,10 +40,12 @@ def _tail_lines(path, n_bytes=16384):
 def _parse_prefill_log(lines):
     game = size_str = speed = None
     active = False
+    total_seen = completed = 0
     for line in lines:
         m = _PF_START.search(line)
         if m:
             game, size_str, active = m.group(1).strip(), None, True
+            total_seen += 1
             continue
         m = _PF_DL.search(line)
         if m and active:
@@ -52,7 +54,11 @@ def _parse_prefill_log(lines):
         m = _PF_DONE.search(line)
         if m:
             speed, active = f"{m.group(1)} Mbit/s", False
-    return {"game": game or "", "size": size_str or "", "speed": speed or "", "active": active}
+            completed += 1
+    return {
+        "game": game or "", "size": size_str or "", "speed": speed or "",
+        "active": active, "completed": completed, "total_seen": total_seen,
+    }
 
 # ── Blizzard Game-Code → Name ─────────────────────────────────────────────────
 BLIZZARD_GAMES = {
@@ -360,6 +366,8 @@ class LanCacheMonitor:
         self.disk_used_gauge      = Gauge("lancache_disk_used_bytes",      "Cache-Verzeichnis genutzt (Bytes)",  registry=self.registry)
         self.disk_available_gauge = Gauge("lancache_disk_available_bytes", "Cache-Verzeichnis frei (Bytes)",     registry=self.registry)
         self.disk_total_gauge     = Gauge("lancache_disk_total_bytes",     "Cache-Verzeichnis gesamt (Bytes)",   registry=self.registry)
+        self.download_rate        = Gauge("lancache_download_rate_bytes",  "Aktuelle Download-Rate (Bytes/s, 60s-Fenster)", registry=self.registry)
+        self.errors_5xx_counter   = Counter("lancache_errors_5xx_total",   "HTTP-5xx-Fehler",  ["cdn"],         registry=self.registry)
 
         self.start_time      = time.time()
         self.total_requests  = self.total_hits = self.total_bytes_served = 0
@@ -367,12 +375,15 @@ class LanCacheMonitor:
         self.prefill_bytes_hit     = 0
         self.prefill_requests_miss = 0
         self.prefill_requests_hit  = 0
-        self.recent_timestamps = deque()  # float-Timestamps der letzten 60s (kein maxlen)
-        self.cdn_stats         = {}
-        self.total_bytes_hit   = 0
-        self.total_bytes_miss  = 0
-        self.history           = []
-        self._next_snapshot    = time.time() + HISTORY_INTERVAL
+        self.recent_timestamps   = deque()  # float-Timestamps der letzten 60s (kein maxlen)
+        self.recent_bytes        = deque()  # (timestamp, bytes) für Download-Rate
+        self._download_rate_bps  = 0.0
+        self.total_errors_5xx    = 0
+        self.cdn_stats           = {}
+        self.total_bytes_hit     = 0
+        self.total_bytes_miss    = 0
+        self.history             = []
+        self._next_snapshot      = time.time() + HISTORY_INTERVAL
 
         self.game_stats         = defaultdict(lambda: {"bytes_hit": 0, "bytes_miss": 0, "hits": 0, "misses": 0})
         self.steam_cache        = load_steam_cache()
@@ -487,6 +498,12 @@ class LanCacheMonitor:
         log_ts = r.get("log_ts", 0)
         if time.time() - log_ts < 300:  # nur Echtzeit-Eintraege, kein Log-Replay
             self.recent_timestamps.append(log_ts)
+            if b > 0:
+                self.recent_bytes.append((log_ts, b))
+
+        if int(r.get("status", 0)) >= 500:
+            self.total_errors_5xx += 1
+            self.errors_5xx_counter.labels(cdn=cdn).inc()
 
         info = extract_game_info(r)
         if info:
@@ -566,14 +583,21 @@ class LanCacheMonitor:
     # ── Log-Monitor & Stats ───────────────────────────────────────────────────
 
     def monitor_logs(self):
-        last_pos = 0
+        last_pos   = 0
+        last_inode = None
         while True:
             try:
                 if os.path.exists(self.log_path):
-                    # Logrotate/Truncate erkennen: Datei kleiner als letzte Position
-                    if os.path.getsize(self.log_path) < last_pos:
-                        logger.info("Log-Datei wurde rotiert/geleert – lese von vorn")
+                    st        = os.stat(self.log_path)
+                    cur_inode = st.st_ino
+                    cur_size  = st.st_size
+                    if last_inode is not None and cur_inode != last_inode:
+                        logger.info("Log-Datei rotiert (neue Inode) – lese von vorn")
                         last_pos = 0
+                    elif cur_size < last_pos:
+                        logger.info("Log-Datei geleert/gekürzt – lese von vorn")
+                        last_pos = 0
+                    last_inode = cur_inode
                     with open(self.log_path, "r") as f:
                         f.seek(last_pos)
                         for line in f:
@@ -596,6 +620,10 @@ class LanCacheMonitor:
                 while self.recent_timestamps and self.recent_timestamps[0] < cutoff:
                     self.recent_timestamps.popleft()
                 self.active_connections.set(len(self.recent_timestamps))
+                while self.recent_bytes and self.recent_bytes[0][0] < cutoff:
+                    self.recent_bytes.popleft()
+                self._download_rate_bps = sum(b for _, b in self.recent_bytes) / 60
+                self.download_rate.set(self._download_rate_bps)
                 tb = int(self.total_bytes_served)
                 self.bytes_served_total.set(tb)
                 logger.info(
@@ -627,7 +655,9 @@ class LanCacheMonitor:
                         logger.warning(f"Disk-Stats nicht lesbar ({NGINX_CACHE_PATH}): {de}")
                 if PREFILL_LOG_PATH:
                     try:
-                        self.prefill_status = _parse_prefill_log(_tail_lines(PREFILL_LOG_PATH))
+                        self.prefill_status = _parse_prefill_log(
+                            _tail_lines(PREFILL_LOG_PATH, n_bytes=131072)
+                        )
                     except Exception as pe:
                         logger.warning(f"Prefill-Log nicht lesbar ({PREFILL_LOG_PATH}): {pe}")
             except Exception as e:
@@ -770,8 +800,11 @@ class LanCacheMonitor:
                             "requests_miss": monitor.prefill_requests_miss,
                             "requests_hit":  monitor.prefill_requests_hit,
                         },
-                        "disk": disk,
-                        "prefill_status": monitor.prefill_status,
+                        "disk":                 disk,
+                        "prefill_status":       monitor.prefill_status,
+                        "download_rate_bytes":  monitor._download_rate_bps,
+                        "errors_5xx":           monitor.total_errors_5xx,
+                        "api_key_set":          bool(os.getenv("STEAM_API_KEY", "").strip()),
                     }
                     out = json.dumps(data).encode()
                     self.send_response(200)
