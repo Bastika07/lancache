@@ -17,6 +17,7 @@ STEAM_CACHE_FILE   = os.path.join(CACHE_DIR, "steam_names.json")
 STEAM_APPLIST_FILE = os.path.join(CACHE_DIR, "steam_applist.json")
 STEAM_APPLIST_TTL  = 7200    # AppList alle 2h neu laden
 RETRY_UNKNOWN_TTL  = 7200    # "Depot XXXXX"-Eintraege nach 2h nochmal versuchen
+NGINX_CACHE_PATH   = os.getenv("NGINX_CACHE_PATH", "")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -321,8 +322,18 @@ class LanCacheMonitor:
         self.bytes_served_total = Gauge("lancache_bytes_served_total",   "Total bytes served",                             registry=self.registry)
         self.uptime_seconds     = Gauge("lancache_uptime_seconds",       "Uptime seconds",                                 registry=self.registry)
 
+        self.prefill_bytes_counter    = Counter("lancache_prefill_bytes_total",    "Bytes von IGNORE_IPS", ["hit_status"], registry=self.registry)
+        self.prefill_requests_counter = Counter("lancache_prefill_requests_total", "Requests von IGNORE_IPS", ["hit_status"], registry=self.registry)
+        self.disk_used_gauge      = Gauge("lancache_disk_used_bytes",      "Cache-Verzeichnis genutzt (Bytes)",  registry=self.registry)
+        self.disk_available_gauge = Gauge("lancache_disk_available_bytes", "Cache-Verzeichnis frei (Bytes)",     registry=self.registry)
+        self.disk_total_gauge     = Gauge("lancache_disk_total_bytes",     "Cache-Verzeichnis gesamt (Bytes)",   registry=self.registry)
+
         self.start_time      = time.time()
         self.total_requests  = self.total_hits = self.total_bytes_served = 0
+        self.prefill_bytes_miss    = 0
+        self.prefill_bytes_hit     = 0
+        self.prefill_requests_miss = 0
+        self.prefill_requests_hit  = 0
         self.recent_requests = deque(maxlen=1000)
         self.cdn_stats       = {}
 
@@ -380,6 +391,18 @@ class LanCacheMonitor:
             return
         if r.get("ip") in self.ignore_ips:
             self.ignored_requests.inc()
+            b   = r.get("bytes", 0)
+            hit = self.is_cache_hit(r)
+            hs  = "HIT" if hit else "MISS"
+            self.prefill_requests_counter.labels(hit_status=hs).inc()
+            if b > 0:
+                self.prefill_bytes_counter.labels(hit_status=hs).inc(b)
+                if hit:
+                    self.prefill_bytes_hit     += b
+                    self.prefill_requests_hit  += 1
+                else:
+                    self.prefill_bytes_miss    += b
+                    self.prefill_requests_miss += 1
             return
         self.total_requests += 1
         cdn, method, status = r.get("cdn", "unknown"), r.get("method", "GET"), str(r.get("status", 0))
@@ -525,6 +548,16 @@ class LanCacheMonitor:
                     f"Hit Rate: {(self.total_hits / max(self.total_requests, 1)) * 100:.1f}%, "
                     f"Bytes: {tb / (1024**3):.1f} GB"
                 )
+                if NGINX_CACHE_PATH:
+                    try:
+                        st    = os.statvfs(NGINX_CACHE_PATH)
+                        total = st.f_blocks * st.f_frsize
+                        free  = st.f_bavail * st.f_frsize
+                        self.disk_used_gauge.set(total - free)
+                        self.disk_available_gauge.set(free)
+                        self.disk_total_gauge.set(total)
+                    except Exception as de:
+                        logger.warning(f"Disk-Stats nicht lesbar ({NGINX_CACHE_PATH}): {de}")
             except Exception as e:
                 logger.error(f"Fehler beim Aktualisieren: {e}")
             time.sleep(30)
@@ -637,6 +670,33 @@ class LanCacheMonitor:
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(b"OK")
+
+                elif path == "/stats":
+                    disk = {}
+                    if NGINX_CACHE_PATH:
+                        try:
+                            st    = os.statvfs(NGINX_CACHE_PATH)
+                            total = st.f_blocks * st.f_frsize
+                            free  = st.f_bavail * st.f_frsize
+                            disk  = {"used_bytes": total - free, "available_bytes": free, "total_bytes": total}
+                        except Exception:
+                            pass
+                    data = {
+                        "prefill": {
+                            "bytes_miss":    monitor.prefill_bytes_miss,
+                            "bytes_hit":     monitor.prefill_bytes_hit,
+                            "requests_miss": monitor.prefill_requests_miss,
+                            "requests_hit":  monitor.prefill_requests_hit,
+                        },
+                        "disk": disk,
+                    }
+                    out = json.dumps(data).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
 
                 else:
                     self.send_response(404)

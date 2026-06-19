@@ -36,11 +36,13 @@ services:
     volumes:
       - ${CACHE_ROOT}/logs:/data/logs:ro
       - ${CACHE_ROOT}/monitor-cache:/data/cache
+      - ${CACHE_ROOT}/cache:/data/nginx-cache:ro
     ports:
       - "9114:9114"
     environment:
       - LOG_PATH=/data/logs/access.log
       - PROMETHEUS_PORT=9114
+      - NGINX_CACHE_PATH=/data/nginx-cache
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9114/health', timeout=3)"]
       interval: 30s

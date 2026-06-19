@@ -76,6 +76,19 @@
       <div class="card-value" id="game-count">–</div>
       <div class="card-sub" id="depot-count-sub">Einträge gesamt</div>
     </div>
+    <div class="card" id="prefill-card" style="display:none;">
+      <div class="card-label">Prefill gecacht</div>
+      <div class="card-value" id="prefill-miss">–</div>
+      <div class="card-sub" id="prefill-sub">neu im Cache</div>
+    </div>
+    <div class="card" id="disk-card" style="display:none;">
+      <div class="card-label">Cache-Größe</div>
+      <div class="card-value" id="disk-used">–</div>
+      <div class="card-sub" id="disk-sub">–</div>
+      <div style="background:#2d3748;border-radius:4px;height:6px;margin-top:8px;">
+        <div id="disk-bar" style="border-radius:4px;height:6px;width:0%;background:#48bb78;transition:width 0.5s;"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Top Spiele -->
@@ -241,16 +254,46 @@ async function loadDepots() {
   }
 }
 
+async function loadStats() {
+  try {
+    const r = await fetch(MONITOR_BASE + '/stats');
+    if (!r.ok) return;
+    const s = await r.json();
+
+    if (s.prefill) {
+      const total = s.prefill.bytes_miss + s.prefill.bytes_hit;
+      if (total > 0) {
+        const hitPct = (s.prefill.bytes_hit / total * 100).toFixed(0);
+        document.getElementById('prefill-miss').textContent = fmtBytes(s.prefill.bytes_miss);
+        document.getElementById('prefill-sub').textContent = `neu gecacht · ${hitPct}% bereits vorhanden`;
+        document.getElementById('prefill-card').style.display = '';
+      }
+    }
+
+    if (s.disk && s.disk.total_bytes > 0) {
+      const pct = s.disk.used_bytes / s.disk.total_bytes * 100;
+      document.getElementById('disk-used').textContent = fmtBytes(s.disk.used_bytes);
+      document.getElementById('disk-sub').textContent =
+        `von ${fmtBytes(s.disk.total_bytes)} · ${pct.toFixed(0)}% belegt`;
+      const bar = document.getElementById('disk-bar');
+      bar.style.width = pct.toFixed(1) + '%';
+      bar.style.background = pct > 90 ? '#fc8181' : pct > 75 ? '#f6c90e' : '#48bb78';
+      document.getElementById('disk-card').style.display = '';
+    }
+  } catch (_) {}
+}
+
 // Init
 loadDepots();
+loadStats();
 let autoRefresh = true;
-let refreshInterval = setInterval(loadDepots, 30000);
+let refreshInterval = setInterval(() => { loadDepots(); loadStats(); }, 30000);
 
 function toggleAutoRefresh() {
   autoRefresh = !autoRefresh;
   const btn = document.getElementById('refresh-toggle');
   if (autoRefresh) {
-    refreshInterval = setInterval(loadDepots, 30000);
+    refreshInterval = setInterval(() => { loadDepots(); loadStats(); }, 30000);
     btn.textContent = '⏸ Auto-Refresh AN';
     btn.classList.remove('btn-off');
   } else {
