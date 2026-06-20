@@ -29,19 +29,16 @@ HISTORY_MAX        = 1440  # 24h bei 1-min-Intervall
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
-def _tail_lines(path, n_bytes=16384):
-    with open(path, 'rb') as f:
-        f.seek(0, 2)
-        size = f.tell()
-        f.seek(-min(size, n_bytes), 2)
-        return f.read().decode('utf-8', errors='replace').splitlines()
-
-
-def _parse_prefill_log(lines):
-    game = size_str = speed = None
-    active = False
-    games     = {}   # Spielname (lower) -> True wenn fertig, False wenn (noch) aktiv
-    last_name = None
+def _parse_prefill_log(lines, state):
+    """Wertet neue Zeilen aus und aktualisiert `state` inkrementell, damit der
+    Fortschritt ueber alle Polls seit dem letzten Lauf-Reset erhalten bleibt,
+    statt sich auf ein festes Tail-Fenster zu beschraenken."""
+    games     = state["games"]
+    last_name = state["last_name"]
+    game      = state["game"]
+    size_str  = state["size"]
+    speed     = state["speed"]
+    active    = state["active"]
     for line in lines:
         m = _PF_START.search(line)
         if m:
@@ -64,6 +61,9 @@ def _parse_prefill_log(lines):
             speed, active = f"{m.group(1)} Mbit/s", False
             if last_name is not None:
                 games[last_name] = True
+    state["last_name"], state["game"], state["size"], state["speed"], state["active"] = (
+        last_name, game, size_str, speed, active,
+    )
     return {
         "game": game or "", "size": size_str or "", "speed": speed or "",
         "active": active, "completed": sum(games.values()), "total_seen": len(games),
@@ -405,6 +405,12 @@ class LanCacheMonitor:
         self.name_resolve_queue = set()
         self.lock               = threading.Lock()
         self.prefill_status     = {}
+        self._prefill_pos       = 0
+        self._prefill_inode     = None
+        self._prefill_state     = {
+            "games": {}, "last_name": None,
+            "game": None, "size": None, "speed": None, "active": False,
+        }
 
         for g in [self.hit_rate, self.active_connections, self.bytes_served_total]:
             g.set(0)
@@ -679,9 +685,27 @@ class LanCacheMonitor:
                         logger.warning(f"Disk-Stats nicht lesbar ({NGINX_CACHE_PATH}): {de}")
                 if PREFILL_LOG_PATH:
                     try:
-                        self.prefill_status = _parse_prefill_log(
-                            _tail_lines(PREFILL_LOG_PATH, n_bytes=131072)
-                        )
+                        st        = os.stat(PREFILL_LOG_PATH)
+                        cur_inode = st.st_ino
+                        cur_size  = st.st_size
+                        if self._prefill_inode is not None and cur_inode != self._prefill_inode:
+                            logger.info("Prefill-Log rotiert (neue Inode) – lese von vorn")
+                            self._prefill_pos = 0
+                        elif cur_size < self._prefill_pos:
+                            logger.info("Prefill-Log geleert/gekuerzt – lese von vorn")
+                            self._prefill_pos = 0
+                        self._prefill_inode = cur_inode
+                        if self._prefill_pos == 0:
+                            self._prefill_state = {
+                                "games": {}, "last_name": None,
+                                "game": None, "size": None, "speed": None, "active": False,
+                            }
+                        with open(PREFILL_LOG_PATH, "r", errors="replace") as f:
+                            f.seek(self._prefill_pos)
+                            new_lines = f.read().splitlines()
+                            self._prefill_pos = f.tell()
+                        if new_lines:
+                            self.prefill_status = _parse_prefill_log(new_lines, self._prefill_state)
                     except Exception as pe:
                         logger.warning(f"Prefill-Log nicht lesbar ({PREFILL_LOG_PATH}): {pe}")
             except Exception as e:
