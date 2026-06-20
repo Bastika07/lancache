@@ -23,6 +23,7 @@ _IP_RE             = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
 _PF_START          = re.compile(r'Starting (.+)$')
 _PF_DL             = re.compile(r'Downloading ([\d.]+) (\w+) from (\d+) chunks')
 _PF_DONE           = re.compile(r'Finished in [\d:.]+ - ([\d.]+) Mbit/s')
+_PF_DEPOT          = re.compile(r'Downloading manifest \d+ for depot (\d+)')
 HISTORY_INTERVAL   = int(os.getenv("HISTORY_INTERVAL", "60"))  # Sekunden pro Snapshot
 HISTORY_MAX        = 1440  # 24h bei 1-min-Intervall
 
@@ -32,13 +33,16 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 def _parse_prefill_log(lines, state):
     """Wertet neue Zeilen aus und aktualisiert `state` inkrementell, damit der
     Fortschritt ueber alle Polls seit dem letzten Lauf-Reset erhalten bleibt,
-    statt sich auf ein festes Tail-Fenster zu beschraenken."""
-    games     = state["games"]
-    last_name = state["last_name"]
-    game      = state["game"]
-    size_str  = state["size"]
-    speed     = state["speed"]
-    active    = state["active"]
+    statt sich auf ein festes Tail-Fenster zu beschraenken. Gibt zusaetzlich
+    die in diesem Batch neu gesehenen Depot-ID→Spielname-Zuordnungen zurueck
+    (Steam-Prefill kennt den Namen aus der Bibliothek, ganz ohne AppList/API)."""
+    games      = state["games"]
+    last_name  = state["last_name"]
+    game       = state["game"]
+    size_str   = state["size"]
+    speed      = state["speed"]
+    active     = state["active"]
+    new_depots = {}
     for line in lines:
         m = _PF_START.search(line)
         if m:
@@ -52,6 +56,10 @@ def _parse_prefill_log(lines, state):
             games[key] = False
             last_name  = key
             continue
+        m = _PF_DEPOT.search(line)
+        if m and game:
+            new_depots[int(m.group(1))] = game
+            continue
         m = _PF_DL.search(line)
         if m and active:
             size_str = f"{m.group(1)} {m.group(2)}"
@@ -64,10 +72,11 @@ def _parse_prefill_log(lines, state):
     state["last_name"], state["game"], state["size"], state["speed"], state["active"] = (
         last_name, game, size_str, speed, active,
     )
-    return {
+    status = {
         "game": game or "", "size": size_str or "", "speed": speed or "",
         "active": active, "completed": sum(games.values()), "total_seen": len(games),
     }
+    return status, new_depots
 
 # ── Blizzard Game-Code → Name ─────────────────────────────────────────────────
 BLIZZARD_GAMES = {
@@ -586,6 +595,26 @@ class LanCacheMonitor:
             return game_id, f"Windows Update ({str(game_id)[:8]}...)", "builtin"
         return game_id, str(game_id), "unknown"
 
+    def _merge_prefill_depots(self, new_depots):
+        """Traegt Depot→Name-Zuordnungen aus dem Steam-Prefill-Log in den
+        Cache ein. Nur Luecken auffuellen (kein Eintrag oder "unknown") –
+        bereits per AppList/appdetails aufgeloeste Depots (mit echter App-ID
+        zur Gruppierung mehrerer Depots) bleiben unangetastet."""
+        now     = time.time()
+        changed = False
+        with self.lock:
+            for depot_id, name in new_depots.items():
+                key   = f"depot_{depot_id}"
+                entry = self.steam_cache.get(key)
+                if entry is None or entry.get("source") == "unknown":
+                    self.steam_cache[key] = {
+                        "app_id": depot_id, "name": name,
+                        "source": "prefill", "_fetched": now,
+                    }
+                    changed = True
+        if changed:
+            save_steam_cache(self.steam_cache)
+
     def resolve_names_worker(self):
         while True:
             try:
@@ -705,7 +734,11 @@ class LanCacheMonitor:
                             new_lines = f.read().splitlines()
                             self._prefill_pos = f.tell()
                         if new_lines:
-                            self.prefill_status = _parse_prefill_log(new_lines, self._prefill_state)
+                            self.prefill_status, new_depots = _parse_prefill_log(
+                                new_lines, self._prefill_state
+                            )
+                            if new_depots:
+                                self._merge_prefill_depots(new_depots)
                     except Exception as pe:
                         logger.warning(f"Prefill-Log nicht lesbar ({PREFILL_LOG_PATH}): {pe}")
             except Exception as e:
