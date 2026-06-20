@@ -22,7 +22,7 @@ PREFILL_LOG_PATH   = os.getenv("PREFILL_LOG_PATH", "")
 _IP_RE             = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
 _PF_START          = re.compile(r'Starting (.+)$')
 _PF_DL             = re.compile(r'Downloading ([\d.]+) (\w+) from (\d+) chunks')
-_PF_DONE           = re.compile(r'Finished in [\d.]+ - ([\d.]+) Mbit/s')
+_PF_DONE           = re.compile(r'Finished in [\d:.]+ - ([\d.]+) Mbit/s')
 HISTORY_INTERVAL   = int(os.getenv("HISTORY_INTERVAL", "60"))  # Sekunden pro Snapshot
 HISTORY_MAX        = 1440  # 24h bei 1-min-Intervall
 
@@ -40,12 +40,20 @@ def _tail_lines(path, n_bytes=16384):
 def _parse_prefill_log(lines):
     game = size_str = speed = None
     active = False
-    total_seen = completed = 0
+    games     = {}   # Spielname (lower) -> True wenn fertig, False wenn (noch) aktiv
+    last_name = None
     for line in lines:
         m = _PF_START.search(line)
         if m:
             game, size_str, active = m.group(1).strip(), None, True
-            total_seen += 1
+            key = game.lower()
+            if last_name is not None and key < last_name:
+                # Name liegt alphabetisch vor dem letzten -> neuer Lauf hat von vorne
+                # begonnen (Steam-Prefill geht die Bibliothek alphabetisch durch);
+                # alte Zaehlung verwerfen, sonst mischen sich zwei Laeufe in die Anzeige
+                games.clear()
+            games[key] = False
+            last_name  = key
             continue
         m = _PF_DL.search(line)
         if m and active:
@@ -54,10 +62,11 @@ def _parse_prefill_log(lines):
         m = _PF_DONE.search(line)
         if m:
             speed, active = f"{m.group(1)} Mbit/s", False
-            completed += 1
+            if last_name is not None:
+                games[last_name] = True
     return {
         "game": game or "", "size": size_str or "", "speed": speed or "",
-        "active": active, "completed": completed, "total_seen": total_seen,
+        "active": active, "completed": sum(games.values()), "total_seen": len(games),
     }
 
 # ── Blizzard Game-Code → Name ─────────────────────────────────────────────────
