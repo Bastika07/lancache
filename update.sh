@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 INSTALL_DIR="${CACHE_ROOT:-/opt/lancache}"
+# CACHE_ROOT ist hier nur der Installationspfad. Nicht an docker compose weiterreichen:
+# eine gesetzte Env-Variable hat Vorrang vor der .env (CACHE_ROOT=${INSTALL_DIR}/data)
+# und wuerde den Cache sonst ausserhalb von data/ anlegen.
+unset CACHE_ROOT
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; BOLD='\033[1m'; RESET='\033[0m'
 
 echo -e "${BOLD}${CYAN}=== LanCache Update ===${RESET}"

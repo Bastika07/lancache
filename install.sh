@@ -27,6 +27,10 @@ log_section() {
 
 REPO_RAW="https://raw.githubusercontent.com/Bastika07/lancache/master"
 INSTALL_DIR="${CACHE_ROOT:-/opt/lancache}"
+# CACHE_ROOT ist hier nur der Installationspfad. Nicht an docker compose weiterreichen:
+# eine gesetzte Env-Variable hat Vorrang vor der .env (CACHE_ROOT=${INSTALL_DIR}/data)
+# und wuerde den Cache sonst ausserhalb von data/ anlegen.
+unset CACHE_ROOT
 CACHE_DISK_SIZE="${CACHE_DISK_SIZE:-500g}"
 
 [[ $EUID -ne 0 ]] && log_error "Bitte als root oder mit sudo ausfuehren."
